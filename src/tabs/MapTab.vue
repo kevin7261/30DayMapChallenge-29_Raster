@@ -16,23 +16,17 @@
    * - Bootstrap 5 樣式
    */
 
-  import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
+  import { ref, onMounted, onUnmounted } from 'vue';
   import * as d3 from 'd3';
   import { useDataStore } from '@/stores/dataStore.js';
-  import { useDefineStore } from '@/stores/defineStore.js';
 
   export default {
     name: 'MapTab',
-    props: {
-      currentCountry: { type: String, default: '國家名稱' },
-    },
     emits: ['map-ready'],
     setup(props, { emit }) {
-      // 📦 存儲實例
       const dataStore = useDataStore();
-      const defineStore = useDefineStore();
 
-      // 🗺️ 地圖相關變數
+      // 地圖相關變數
       const mapContainer = ref(null);
       const svgElement = ref(null);
       let svg = null;
@@ -40,34 +34,13 @@
       let path = null;
       let zoom = null;
       let g = null;
-      let ringsGroup = null;
 
-      // 🎛️ 地圖控制狀態
+      // 地圖控制狀態
       const isMapReady = ref(false);
       const mapContainerId = ref(`d3-map-${Math.random().toString(36).substr(2, 9)}`);
 
       // 世界地圖數據
       const worldData = ref(null);
-
-      // 圓圈現在使用 D3.js 繪製，不需要大小計算函數
-
-      // 📊 計算屬性：檢查是否有任何圖層可見
-      const isAnyLayerVisible = computed(() => dataStore.getAllLayers().length > 0);
-
-      // 🏙️ 當前國家信息
-      const currentCountryInfo = computed(() => {
-        if (!props.currentCountry) {
-          return null;
-        }
-
-        const allLayers = dataStore.getAllLayers();
-        const countryLayer = allLayers.find((layer) => layer.layerName === props.currentCountry);
-        if (countryLayer) {
-          return {};
-        } else {
-          return null;
-        }
-      });
 
       /**
        * 📥 載入世界地圖數據
@@ -170,64 +143,7 @@
         }
       };
 
-      /**
-       * 🔵 繪製以投影中心為圓心的同心距離圓
-       * 每 5000 公里一圈，淺灰虛線，永遠位於地圖上層
-       * 最多繪製到 15000 公里（3 圈）
-       * 地球邊界（180°）繪製實線圓圈
-       */
-      const drawDistanceRings = () => {
-        if (!svg || !projection || !mapContainer.value) return;
-
-        const [cx, cy] = projection.translate();
-        const scale = projection.scale();
-
-        // 以公尺為單位的地球半徑與步長（5000 公里）
-        const earthRadiusMeters = 6371008.8;
-        const stepMeters = 5000000; // 5000 km
-        const maxDistanceMeters = 15000000; // 15000 km
-
-        // 計算需要的圈數與對應像素半徑（r = scale * (distance / R)）
-        const rings = [];
-        for (let i = 1; i <= 3; i++) {
-          const distanceMeters = stepMeters * i;
-          if (distanceMeters > maxDistanceMeters) break;
-          const radiusPx = scale * (distanceMeters / earthRadiusMeters);
-          rings.push({ index: i, radiusPx, type: 'distance' });
-        }
-
-        // 加入地球邊界圓（180° = π * R，在方位等距投影中對應到 scale * π）
-        const earthBoundaryRadiusPx = scale * Math.PI;
-        rings.push({ index: 999, radiusPx: earthBoundaryRadiusPx, type: 'boundary' });
-
-        if (!ringsGroup) {
-          ringsGroup = svg
-            .append('g')
-            .attr('class', 'rings-overlay')
-            .style('pointer-events', 'none');
-        }
-
-        // 確保在最上層
-        ringsGroup.raise();
-
-        // 資料繫結與繪製
-        const selection = ringsGroup.selectAll('circle.ring').data(rings, (d) => d.index);
-
-        selection
-          .enter()
-          .append('circle')
-          .attr('class', 'ring')
-          .attr('fill', 'none')
-          .merge(selection)
-          .attr('cx', cx)
-          .attr('cy', cy)
-          .attr('r', (d) => d.radiusPx)
-          .attr('stroke', (d) => (d.type === 'boundary' ? '#666666' : '#cccccc'))
-          .attr('stroke-width', (d) => (d.type === 'boundary' ? 2 : 1))
-          .attr('stroke-dasharray', (d) => (d.type === 'boundary' ? 'none' : '6,6'));
-
-        selection.exit().remove();
-      };
+      // 距離圓圈功能已移除
 
       /**
        * 🔗 合併多個國家邊界
@@ -376,9 +292,6 @@
         // 更新所有路徑
         g.selectAll('path.country').attr('d', path);
 
-        // 重新繪製距離圓
-        drawDistanceRings();
-
         console.log('[MapTab] 地圖導航完成，中心:', center);
       };
 
@@ -405,9 +318,6 @@
 
         // 更新所有路徑
         g.selectAll('path.country').attr('d', path);
-
-        // 重新繪製距離圓
-        drawDistanceRings();
 
         console.log('[MapTab] 地圖尺寸更新完成');
       };
@@ -439,8 +349,6 @@
           if (createMap()) {
             console.log('[MapTab] 地圖創建成功，開始繪製世界地圖');
             await drawWorldMap();
-            // 繪製距離圓（置於最上層）
-            drawDistanceRings();
           } else {
             console.log('[MapTab] 地圖創建失敗，100ms 後重試');
             setTimeout(tryCreateMap, 100);
@@ -474,10 +382,8 @@
 
       // 🧹 生命週期：組件掛載
       onMounted(() => {
-        nextTick(() => {
-          initMap();
-          setupResizeObserver();
-        });
+        initMap();
+        setupResizeObserver();
       });
 
       // 🧹 生命週期：組件卸載
@@ -502,40 +408,12 @@
         isMapReady.value = false;
       });
 
-      // 👀 監聽器：監聽資料存儲中的圖層變化
-      watch(
-        () => dataStore.layers,
-        () => {
-          if (isMapReady.value) {
-            // 距離圓圈功能已移除
-          }
-        },
-        { deep: true }
-      );
-
-      // 👀 監聽器：監聽當前國家變化
-      watch(
-        () => props.currentCountry,
-        (newCountry) => {
-          if (isMapReady.value && newCountry) {
-            // currentCountry 是 layerName，需要找到對應的圖層
-            const allLayers = dataStore.getAllLayers();
-            const layer = allLayers.find((l) => l.layerName === newCountry);
-            if (layer) {
-              navigateToLocation(layer.center);
-            }
-          }
-        }
-      );
+      // 監聽器已移除
 
       // 📤 返回組件公開的屬性和方法
       return {
         mapContainer,
         mapContainerId,
-        isAnyLayerVisible,
-        currentCountryInfo,
-        invalidateSize,
-        defineStore,
         navigateToLocation,
       };
     },
