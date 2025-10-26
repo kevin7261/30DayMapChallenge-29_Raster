@@ -143,7 +143,64 @@
         }
       };
 
-      // 距離圓圈功能已移除
+      // 距離圓圈相關變數
+      let ringsGroup = null;
+
+      /**
+       * 🔵 繪製以投影中心為圓心的同心距離圓
+       * 每 5000 公里一圈，淺灰虛線，永遠位於地圖上層
+       * 最多繪製到 15000 公里（3 圈）
+       * 地球邊界（180°）繪製實線圓圈
+       */
+      const drawDistanceRings = () => {
+        if (!svg || !projection || !mapContainer.value) return;
+
+        const rect = mapContainer.value.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const scale = projection.scale();
+
+        // 地球半徑（公里）
+        const earthRadiusMeters = 6371000;
+        const stepMeters = 5000000; // 5000 公里
+        const maxDistanceMeters = 15000000; // 15000 公里
+
+        const rings = [];
+        for (let i = 1; i <= 10; i++) {
+          const distanceMeters = stepMeters * i;
+          if (distanceMeters > maxDistanceMeters) break;
+          const radiusPx = scale * (distanceMeters / earthRadiusMeters);
+          rings.push({ index: i, radiusPx, type: 'distance' });
+        }
+
+        // 加入地球邊界圓（180° = π * R，在方位等距投影中對應到 scale * π）
+        const earthBoundaryRadiusPx = scale * Math.PI;
+        rings.push({ index: 999, radiusPx: earthBoundaryRadiusPx, type: 'boundary' });
+
+        if (!ringsGroup) {
+          ringsGroup = svg
+            .append('g')
+            .attr('class', 'distance-rings')
+            .style('pointer-events', 'none');
+        }
+
+        const selection = ringsGroup.selectAll('circle.ring').data(rings, (d) => d.index);
+
+        selection
+          .enter()
+          .append('circle')
+          .attr('class', 'ring')
+          .attr('fill', 'none')
+          .merge(selection)
+          .attr('cx', cx)
+          .attr('cy', cy)
+          .attr('r', (d) => d.radiusPx)
+          .attr('stroke', (d) => (d.type === 'boundary' ? '#666666' : '#cccccc'))
+          .attr('stroke-width', (d) => (d.type === 'boundary' ? 2 : 1))
+          .attr('stroke-dasharray', (d) => (d.type === 'boundary' ? 'none' : '6,6'));
+
+        selection.exit().remove();
+      };
 
       /**
        * 🔗 合併多個國家邊界
@@ -259,6 +316,9 @@
             taiwanFeatures.length,
             '個，已造訪國家: 1個合併形狀'
           );
+
+          // 繪製距離圓圈
+          drawDistanceRings();
         } catch (error) {
           console.error('[MapTab] 合併國家地圖繪製失敗:', error);
         }
@@ -292,6 +352,9 @@
         // 更新所有路徑
         g.selectAll('path.country').attr('d', path);
 
+        // 更新距離圓圈
+        drawDistanceRings();
+
         console.log('[MapTab] 地圖導航完成，中心:', center);
       };
 
@@ -318,6 +381,9 @@
 
         // 更新所有路徑
         g.selectAll('path.country').attr('d', path);
+
+        // 更新距離圓圈
+        drawDistanceRings();
 
         console.log('[MapTab] 地圖尺寸更新完成');
       };
@@ -405,6 +471,7 @@
         path = null;
         zoom = null;
         g = null;
+        ringsGroup = null;
         isMapReady.value = false;
       });
 
@@ -435,7 +502,7 @@
     overflow: hidden;
   }
 
-  /* 距離圓圈現在使用 D3.js 繪製，不需要 CSS 樣式 */
+  /* 距離圓圈使用 D3.js 繪製，包含 5000km 虛線圓圈和地球邊界實線圓圈 */
 
   :deep(.country) {
     transition: fill 0.2s ease;
