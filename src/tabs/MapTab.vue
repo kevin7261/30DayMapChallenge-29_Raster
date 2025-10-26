@@ -230,7 +230,48 @@
       };
 
       /**
-       * 🎨 繪製世界地圖 - 只顯示已造訪的國家
+       * 🔗 合併多個國家邊界
+       * 創建一個包含所有已造訪國家的單一 FeatureCollection
+       */
+      const mergeCountries = (features) => {
+        if (features.length === 0) return null;
+        if (features.length === 1) return features[0];
+
+        try {
+          // 創建一個合併的 FeatureCollection
+          const mergedFeature = {
+            type: 'Feature',
+            properties: {
+              name: 'Visited Countries',
+              merged: true,
+              count: features.length,
+            },
+            geometry: {
+              type: 'MultiPolygon',
+              coordinates: [],
+            },
+          };
+
+          // 將所有國家的座標合併到 MultiPolygon 中
+          features.forEach((feature) => {
+            if (feature.geometry) {
+              if (feature.geometry.type === 'Polygon') {
+                mergedFeature.geometry.coordinates.push(feature.geometry.coordinates);
+              } else if (feature.geometry.type === 'MultiPolygon') {
+                mergedFeature.geometry.coordinates.push(...feature.geometry.coordinates);
+              }
+            }
+          });
+
+          return mergedFeature;
+        } catch (error) {
+          console.warn('[MapTab] 國家合併失敗，使用原始數據:', error);
+          return features[0]; // 如果合併失敗，返回第一個國家
+        }
+      };
+
+      /**
+       * 🎨 繪製世界地圖 - 合併已造訪的國家
        */
       const drawWorldMap = async () => {
         if (!g || !worldData.value) {
@@ -257,29 +298,53 @@
             visitedCountriesData.features.length
           );
 
-          // 繪製已造訪國家的邊界
-          g.selectAll('path')
-            .data(visitedCountriesData.features)
-            .enter()
-            .append('path')
-            .attr('d', path)
-            .attr('fill', (d) => {
-              // 檢查國家顏色：台灣(紅色) > 已造訪(淺藍色)
-              const countryName = d.properties.name || d.properties.ADMIN || d.properties.NAME;
-              if (dataStore.isHomeCountry(countryName)) return '#ff9999'; // 台灣：紅色
-              return '#cce5ff'; // 已造訪：淺藍色
-            })
-            .attr('stroke', '#666666')
-            .attr('stroke-width', 0.5)
-            .attr('class', 'country');
+          // 分離台灣和其他已造訪國家
+          const taiwanFeatures = visitedCountriesData.features.filter((feature) => {
+            const countryName =
+              feature.properties.name || feature.properties.ADMIN || feature.properties.NAME;
+            return dataStore.isHomeCountry(countryName);
+          });
+
+          const otherVisitedFeatures = visitedCountriesData.features.filter((feature) => {
+            const countryName =
+              feature.properties.name || feature.properties.ADMIN || feature.properties.NAME;
+            return dataStore.isCountryVisited(countryName) && !dataStore.isHomeCountry(countryName);
+          });
+
+          // 合併其他已造訪國家
+          const mergedVisitedCountries = mergeCountries(otherVisitedFeatures);
+
+          // 繪製台灣（紅色）
+          if (taiwanFeatures.length > 0) {
+            g.selectAll('path.taiwan')
+              .data(taiwanFeatures)
+              .enter()
+              .append('path')
+              .attr('class', 'taiwan')
+              .attr('d', path)
+              .attr('fill', '#ff9999') // 台灣：紅色
+              .attr('stroke', 'none'); // 移除台灣邊界線
+          }
+
+          // 繪製合併的已造訪國家（深灰色）
+          if (mergedVisitedCountries) {
+            g.selectAll('path.visited-countries')
+              .data([mergedVisitedCountries])
+              .enter()
+              .append('path')
+              .attr('class', 'visited-countries')
+              .attr('d', path)
+              .attr('fill', '#666666') // 已造訪：深灰色
+              .attr('stroke', 'none'); // 移除邊界線，讓合併的國家看起來像一個統一的形狀
+          }
 
           console.log(
-            '[MapTab] 已造訪國家地圖繪製完成，已繪製',
-            visitedCountriesData.features.length,
-            '個國家'
+            '[MapTab] 合併國家地圖繪製完成，台灣:',
+            taiwanFeatures.length,
+            '個，已造訪國家: 1個合併形狀'
           );
         } catch (error) {
-          console.error('[MapTab] 已造訪國家地圖繪製失敗:', error);
+          console.error('[MapTab] 合併國家地圖繪製失敗:', error);
         }
       };
 
