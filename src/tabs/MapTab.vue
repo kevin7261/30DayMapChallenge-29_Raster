@@ -38,6 +38,9 @@
       // 點數據
       const pointsData = ref(null);
 
+      // 繪製方向：'y' 表示依y軸（緯度）繪製，'x' 表示依x軸（經度）繪製
+      const drawDirection = ref('y');
+
       /**
        * 📥 載入點數據
        */
@@ -142,7 +145,7 @@
       };
 
       /**
-       * 🎨 繪製點數據地圖 - 按緯度繪製折線圖（每個點高度由value決定）
+       * 🎨 繪製點數據地圖 - 按緯度或經度繪製折線圖（每個點高度由value決定）
        */
       const drawPointsMap = async () => {
         if (!g || !pointsData.value) {
@@ -173,108 +176,93 @@
           // 線條寬度統一為2px，不再需要動態計算
 
           // 計算高度比例尺（value 映射到像素高度）
-          // 使用地圖高度的 10% 作為最大高度偏移（放大2倍：從5%到10%）
+          // 統一使用地圖高度的 7.5% 作為最大高度偏移（放大1.5倍：從5%到7.5%）
           const rect = mapContainer.value.getBoundingClientRect();
-          const maxHeightOffset = rect.height * 0.1; // 放大2倍
+          const maxHeightOffset = rect.height * 0.075; // 統一放大1.5倍
           const heightScale = d3
             .scaleLinear()
             .domain([minValue, maxValue])
             .range([0, maxHeightOffset]);
 
-          // 按緯度（y座標）分組
-          // 優先使用grid_y屬性分組，如果沒有則使用四捨五入的緯度值
-          const latGroups = new Map();
+          // 根據繪製方向分組：'y' 表示依y軸（緯度）繪製，'x' 表示依x軸（經度）繪製
+          const groups = new Map();
 
           features.forEach((feature) => {
             const lat = feature.geometry.coordinates[1]; // 緯度
             const lon = feature.geometry.coordinates[0]; // 經度
             const value = feature.properties?.value || 0;
             const gridY = feature.properties?.grid_y; // 網格Y座標
+            const gridX = feature.properties?.grid_x; // 網格X座標
 
-            // 使用grid_y作為分組鍵（如果存在），否則使用四捨五入的緯度值
-            const latKey = gridY !== undefined ? `grid_${gridY}` : Math.round(lat * 100) / 100;
+            if (drawDirection.value === 'y') {
+              // 按緯度（y座標）分組
+              const latKey = gridY !== undefined ? `grid_${gridY}` : Math.round(lat * 100) / 100;
 
-            if (!latGroups.has(latKey)) {
-              latGroups.set(latKey, {
-                lat: lat, // 使用第一個點的緯度作為代表值
-                gridY: gridY, // 保存grid_y值
-                points: [], // 存儲 {lon, lat, value} 對
-              });
+              if (!groups.has(latKey)) {
+                groups.set(latKey, {
+                  key: latKey,
+                  coord: lat, // 緯度代表值
+                  gridCoord: gridY, // 網格座標
+                  points: [], // 存儲 {lon, lat, value} 對
+                  isYAxis: true, // 標記為y軸分組
+                });
+              }
+
+              const group = groups.get(latKey);
+              group.points.push({ lon, lat, value });
+            } else {
+              // 按經度（x座標）分組
+              const lonKey = gridX !== undefined ? `grid_${gridX}` : Math.round(lon * 100) / 100;
+
+              if (!groups.has(lonKey)) {
+                groups.set(lonKey, {
+                  key: lonKey,
+                  coord: lon, // 經度代表值
+                  gridCoord: gridX, // 網格座標
+                  points: [], // 存儲 {lon, lat, value} 對
+                  isYAxis: false, // 標記為x軸分組
+                });
+              }
+
+              const group = groups.get(lonKey);
+              group.points.push({ lon, lat, value });
             }
-
-            const group = latGroups.get(latKey);
-            // 使用原始緯度值存儲，以便準確投影
-            group.points.push({ lon, lat, value }); // 在points中存儲lat以便折線生成器使用
           });
 
-          // 轉換為折線數據：對每個緯度的點按經度排序，並計算折線路徑
-          // 過濾掉grid_y為奇數的線（只保留偶數）
-          const lineData = Array.from(latGroups.values())
+          // 轉換為折線數據：根據繪製方向排序和閉合
+          // 過濾掉grid座標為奇數的線（只保留偶數）
+          const lineData = Array.from(groups.values())
             .filter((group) => {
-              // 如果gridY是單數（奇數），則過濾掉
-              if (group.gridY !== undefined) {
-                return group.gridY % 2 === 0; // 只保留偶數
+              // 如果grid座標是單數（奇數），則過濾掉
+              if (group.gridCoord !== undefined) {
+                return group.gridCoord % 2 === 0; // 只保留偶數
               }
-              // 如果沒有gridY，則保留（可能是使用緯度分組的情況）
+              // 如果沒有grid座標，則保留
               return true;
             })
             .map((group) => {
-              // 按經度排序，確保從左到右連接
-              const sortedPoints = group.points.sort((a, b) => a.lon - b.lon);
+              // 根據方向排序
+              let sortedPoints;
+              if (group.isYAxis) {
+                // y軸模式：按經度排序（從左到右）
+                sortedPoints = group.points.sort((a, b) => a.lon - b.lon);
+              } else {
+                // x軸模式：按緯度排序（從下到上）
+                sortedPoints = group.points.sort((a, b) => a.lat - b.lat);
+              }
 
-              // 計算該緯度上所有點的平均值來決定線條顏色
+              // 計算該組上所有點的平均值來決定線條顏色
               const avgValue =
                 sortedPoints.reduce((sum, p) => sum + p.value, 0) / sortedPoints.length;
               const maxValueInGroup = Math.max(...sortedPoints.map((p) => p.value));
 
-              // 為了閉合頭尾，需要垂直連接到基準y軸，然後在基準y軸上水平連接
-              // 閉合路徑：第一個點 -> 垂直下降到基準y軸 -> 中間所有點 -> 最後一個點 -> 垂直下降到基準y軸 -> 水平回到基準y軸上的第一個點 -> 垂直回到第一個點
-              const closedPoints = [];
-              if (sortedPoints.length > 0) {
-                const firstPoint = sortedPoints[0];
-                const lastPoint = sortedPoints[sortedPoints.length - 1];
-
-                // 1. 第一個點（有高度偏移）
-                closedPoints.push(firstPoint);
-
-                // 2. 基準y軸上的第一個點（垂直下降，value=0表示在基準線上）
-                closedPoints.push({
-                  lon: firstPoint.lon,
-                  lat: group.lat,
-                  value: 0, // 基準點沒有高度偏移
-                });
-
-                // 3. 中間所有點（如果有多個點）
-                if (sortedPoints.length > 2) {
-                  closedPoints.push(...sortedPoints.slice(1, -1));
-                }
-
-                // 4. 最後一個點（有高度偏移）
-                if (sortedPoints.length > 1) {
-                  closedPoints.push(lastPoint);
-                }
-
-                // 5. 基準y軸上的最後一個點（垂直下降，value=0表示在基準線上）
-                closedPoints.push({
-                  lon: lastPoint.lon,
-                  lat: group.lat,
-                  value: 0, // 基準點沒有高度偏移
-                });
-
-                // 6. 基準y軸上的第一個點（水平移動，形成水平閉合線）
-                closedPoints.push({
-                  lon: firstPoint.lon,
-                  lat: group.lat,
-                  value: 0, // 基準點沒有高度偏移
-                });
-
-                // 7. 回到第一個點（垂直上升，完成閉合）
-                closedPoints.push(firstPoint);
-              }
+              // 不閉合頭尾，直接使用所有點
+              const closedPoints = [...sortedPoints];
 
               return {
-                lat: group.lat, // 緯度代表值
-                gridY: group.gridY, // 網格Y座標
+                coord: group.coord, // 座標代表值（緯度或經度）
+                gridCoord: group.gridCoord, // 網格座標
+                isYAxis: group.isYAxis, // 是否為y軸模式
                 points: sortedPoints, // 原始點（用於tooltip）
                 closedPoints: closedPoints, // 閉合的點（用於繪製）
                 avgValue,
@@ -282,31 +270,45 @@
               };
             });
 
-          // 創建緯度到折線顏色的映射，用於點的顏色
-          const latToColorMap = new Map();
+          // 創建座標到折線顏色的映射，用於點的顏色
+          const coordToColorMap = new Map();
           lineData.forEach((line) => {
-            const latKey =
-              line.gridY !== undefined ? `grid_${line.gridY}` : Math.round(line.lat * 100) / 100;
-            latToColorMap.set(latKey, colorScale(line.avgValue));
+            const coordKey =
+              line.gridCoord !== undefined
+                ? `${line.isYAxis ? 'y' : 'x'}_grid_${line.gridCoord}`
+                : `${line.isYAxis ? 'y' : 'x'}_${Math.round(line.coord * 100) / 100}`;
+            coordToColorMap.set(coordKey, colorScale(line.avgValue));
           });
 
-          // 創建折線生成器
+          // 創建折線生成器（根據繪製方向調整高度偏移）
           const lineGenerator = d3
             .line()
             .x((d) => {
-              const coords = projection([d.lon, d.lat]);
-              return coords ? coords[0] : 0;
+              const baseCoords = projection([d.lon, d.lat]);
+              if (!baseCoords) return 0;
+              // y軸模式：x座標正常
+              // x軸模式：x座標向右偏移（x增加），value越大，點越右
+              if (drawDirection.value === 'x') {
+                return baseCoords[0] + heightScale(d.value);
+              }
+              return baseCoords[0];
             })
             .y((d) => {
               const baseCoords = projection([d.lon, d.lat]);
               if (!baseCoords) return 0;
-              // y 座標 = 基礎緯度座標 - value映射的高度（向上偏移，value越大，點越高）
-              return baseCoords[1] - heightScale(d.value);
+              // y軸模式：y座標向上偏移（y減少），value越大，點越高
+              // x軸模式：y座標正常
+              if (drawDirection.value === 'y') {
+                return baseCoords[1] - heightScale(d.value);
+              }
+              return baseCoords[1];
             })
-            .curve(d3.curveMonotoneX); // 使用平滑曲線
+            .curve(d3.curveBasis); // 使用B-spline曲線
 
           // 繪製折線
-          const lines = g.selectAll('path.horizontal-line').data(lineData, (d) => d.lat);
+          const lines = g
+            .selectAll('path.horizontal-line')
+            .data(lineData, (d) => `${d.isYAxis ? 'y' : 'x'}_${d.coord}`);
 
           // 進入的線條
           const enterLines = lines
@@ -317,7 +319,7 @@
             .attr('fill', 'none')
             .style('pointer-events', 'none'); // 折線不攔截鼠標事件，讓點可以接收事件
 
-          // 合併進入和更新的線條 - 使用有質感的金色，4px寬度，填充白色
+          // 合併進入和更新的線條 - 使用有質感的金色，4px寬度
           enterLines
             .merge(lines)
             .attr('d', (d) => lineGenerator(d.closedPoints)) // 使用閉合的點
@@ -326,7 +328,7 @@
             .attr('stroke-linecap', 'round')
             .attr('stroke-linejoin', 'round')
             .attr('opacity', 0.95)
-            .attr('fill', '#FFFFFF') // 填充白色
+            .attr('fill', 'none') // 不填充
             .style('pointer-events', 'none'); // 折線不攔截鼠標事件
 
           // 移除退出的線條
@@ -499,15 +501,26 @@
           const allPoints = enterPoints
             .merge(points)
             .attr('cx', (d) => {
-              const coords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
-              return coords ? coords[0] : 0;
+              const baseCoords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
+              if (!baseCoords) return 0;
+              const value = d.properties?.value || 0;
+              // y軸模式：x座標正常
+              // x軸模式：x座標向右偏移（x增加），value越大，點越右
+              if (drawDirection.value === 'x') {
+                return baseCoords[0] + heightScale(value);
+              }
+              return baseCoords[0];
             })
             .attr('cy', (d) => {
               const baseCoords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
               if (!baseCoords) return 0;
               const value = d.properties?.value || 0;
-              // y 座標 = 基礎緯度座標 - value映射的高度
-              return baseCoords[1] - heightScale(value);
+              // y軸模式：y座標向上偏移（y減少），value越大，點越高
+              // x軸模式：y座標正常
+              if (drawDirection.value === 'y') {
+                return baseCoords[1] - heightScale(value);
+              }
+              return baseCoords[1];
             })
             .attr('fill', 'transparent') // 透明，不顯示
             .attr('stroke', 'none') // 無邊框
@@ -553,39 +566,46 @@
         const minValue = Math.min(...values);
         const maxValue = Math.max(...values);
 
-        // 計算高度比例尺（放大2倍）
+        // 計算高度比例尺（統一放大1.5倍）
         const rect = mapContainer.value.getBoundingClientRect();
-        const maxHeightOffset = rect.height * 0.1; // 放大2倍：從5%到10%
+        const maxHeightOffset = rect.height * 0.075; // 統一放大1.5倍
         const heightScale = d3
           .scaleLinear()
           .domain([minValue, maxValue])
           .range([0, maxHeightOffset]);
 
-        // 創建折線生成器
+        // 創建折線生成器（根據繪製方向調整高度偏移）
         const lineGenerator = d3
           .line()
           .x((d) => {
-            const coords = projection([d.lon, d.lat]);
-            return coords ? coords[0] : 0;
+            const baseCoords = projection([d.lon, d.lat]);
+            if (!baseCoords) return 0;
+            // y軸模式：x座標正常
+            // x軸模式：x座標向右偏移（x增加），value越大，點越右
+            if (drawDirection.value === 'x') {
+              return baseCoords[0] + heightScale(d.value);
+            }
+            return baseCoords[0];
           })
           .y((d) => {
             const baseCoords = projection([d.lon, d.lat]);
             if (!baseCoords) return 0;
-            return baseCoords[1] - heightScale(d.value);
+            // y軸模式：y座標向上偏移（y減少），value越大，點越高
+            // x軸模式：y座標正常
+            if (drawDirection.value === 'y') {
+              return baseCoords[1] - heightScale(d.value);
+            }
+            return baseCoords[1];
           })
-          .curve(d3.curveMonotoneX);
+          .curve(d3.curveBasis); // 使用B-spline曲線
 
         // 更新所有折線路徑（從綁定的數據中獲取closedPoints）
         g.selectAll('path.horizontal-line').attr('d', (d) => {
           if (d && d.closedPoints) {
             return lineGenerator(d.closedPoints);
           } else if (d && d.points) {
-            // 如果沒有closedPoints，則使用points並閉合
-            const closedPoints = [...d.points];
-            if (closedPoints.length > 0) {
-              closedPoints.push(closedPoints[0]);
-            }
-            return lineGenerator(closedPoints);
+            // 如果沒有closedPoints，則直接使用points（不閉合）
+            return lineGenerator(d.points);
           }
           return '';
         });
@@ -754,11 +774,28 @@
 
       // 監聽器已移除
 
+      /**
+       * 🔄 切換繪製方向
+       */
+      const toggleDrawDirection = (direction) => {
+        drawDirection.value = direction;
+        // 重新繪製地圖
+        if (g && pointsData.value) {
+          // 清除現有的線條和點
+          g.selectAll('path.horizontal-line').remove();
+          g.selectAll('circle.data-point').remove();
+          // 重新繪製
+          drawPointsMap();
+        }
+      };
+
       // 📤 返回組件公開的屬性和方法
       return {
         mapContainer,
         mapContainerId,
         navigateToLocation,
+        drawDirection,
+        toggleDrawDirection,
       };
     },
   };
@@ -769,6 +806,36 @@
   <div id="map-container" class="h-100 w-100 position-relative bg-transparent z-0">
     <!-- 🗺️ D3.js 地圖容器 -->
     <div :id="mapContainerId" ref="mapContainer" class="h-100 w-100"></div>
+
+    <!-- 🎛️ 左側中間控制面板 -->
+    <div
+      class="position-absolute"
+      style="top: 50%; left: 0; transform: translateY(-50%); z-index: 1000; padding: 1rem"
+    >
+      <div class="bg-dark bg-opacity-75 rounded-3 p-3">
+        <!-- 🎛️ 繪製方向選擇區域 -->
+        <div class="">
+          <div class="d-flex flex-column gap-1">
+            <button
+              type="button"
+              class="btn border-0 my-country-btn my-font-sm-white px-4 py-3"
+              :class="[drawDirection === 'y' ? 'active' : '']"
+              @click="toggleDrawDirection('y')"
+            >
+              依Y軸繪製
+            </button>
+            <button
+              type="button"
+              class="btn border-0 my-country-btn my-font-sm-white px-4 py-3"
+              :class="[drawDirection === 'x' ? 'active' : '']"
+              @click="toggleDrawDirection('x')"
+            >
+              依X軸繪製
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
