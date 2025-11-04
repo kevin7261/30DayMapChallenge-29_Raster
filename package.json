@@ -1,8 +1,8 @@
 {
-  "name": "30daymapchallenge-04-data-challenge-my-data",
+  "name": "30daymapchallenge-29-raster",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://kevin7261.github.io/30DayMapChallenge-04_Data-challenge-My-Data",
+  "homepage": "https://kevin7261.github.io/30DayMapChallenge-29_Raster",
   "scripts": {
     "serve": "vue-cli-service serve --port 8080",
     "build": "vue-cli-service build",

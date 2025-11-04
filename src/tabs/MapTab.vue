@@ -1,30 +1,27 @@
 <script>
   /**
-   * 🗺️ MapTab.vue - D3.js 世界地圖組件 (D3.js World Map Component)
+   * 🗺️ MapTab.vue - D3.js 點數據地圖組件 (D3.js Points Map Component)
    *
-   * 使用 D3.js 繪製世界地圖，專為世界城市地圖展示設計。
+   * 使用 D3.js 繪製點數據地圖，專為柵格數據點集合展示設計。
    * 主要功能：
-   * - 使用 D3.js 顯示世界地圖
-   * - 提供城市導航功能
-   * - 支援多種投影方式
+   * - 使用 D3.js 顯示點數據地圖
+   * - 根據 value 屬性動態設置點的顏色和大小
+   * - 支援方位等距投影
    * - 響應式設計
    *
    * 技術架構：
    * - Vue 3 Composition API
    * - D3.js 地圖繪製
-   * - Pinia 狀態管理
    * - Bootstrap 5 樣式
    */
 
   import { ref, onMounted, onUnmounted } from 'vue';
   import * as d3 from 'd3';
-  import { useDataStore } from '@/stores/dataStore.js';
 
   export default {
     name: 'MapTab',
     emits: ['map-ready'],
     setup(props, { emit }) {
-      const dataStore = useDataStore();
 
       // 地圖相關變數
       const mapContainer = ref(null);
@@ -39,18 +36,18 @@
       const isMapReady = ref(false);
       const mapContainerId = ref(`d3-map-${Math.random().toString(36).substr(2, 9)}`);
 
-      // 世界地圖數據
-      const worldData = ref(null);
+      // 點數據
+      const pointsData = ref(null);
 
       /**
-       * 📥 載入世界地圖數據
+       * 📥 載入點數據
        */
-      const loadWorldData = async () => {
+      const loadPointsData = async () => {
         try {
           // 使用本地的 GeoJSON 檔案
-          console.log('[MapTab] 開始載入 GeoJSON 數據...');
+          console.log('[MapTab] 開始載入點數據...');
           const response = await fetch(
-            `${process.env.BASE_URL}data/ne_110m_admin_0_countries.geojson`
+            `${process.env.BASE_URL}data/twdtm100_points_pixel_aggregated_200.geojson`
           );
 
           if (!response.ok) {
@@ -58,11 +55,11 @@
           }
 
           const data = await response.json();
-          worldData.value = data;
-          console.log('[MapTab] 世界地圖數據載入成功，特徵數量:', data.features?.length);
+          pointsData.value = data;
+          console.log('[MapTab] 點數據載入成功，特徵數量:', data.features?.length);
           return true;
         } catch (error) {
-          console.error('[MapTab] 世界地圖數據載入失敗:', error);
+          console.error('[MapTab] 點數據載入失敗:', error);
           return false;
         }
       };
@@ -100,7 +97,8 @@
           const padding = 32;
           const availableWidth = width - padding * 2;
           const availableHeight = height - padding * 2;
-          const scale = Math.min(availableWidth, availableHeight) / 6;
+          // 對於點數據，使用更大的縮放比例以便更好地顯示
+          const scale = Math.min(availableWidth, availableHeight) / 2;
 
           projection = d3
             .geoAzimuthalEquidistant()
@@ -203,124 +201,84 @@
       };
 
       /**
-       * 🔗 合併多個國家邊界
-       * 創建一個包含所有已造訪國家的單一 FeatureCollection
+       * 🎨 繪製點數據地圖
        */
-      const mergeCountries = (features) => {
-        if (features.length === 0) return null;
-        if (features.length === 1) return features[0];
-
-        try {
-          // 創建一個合併的 FeatureCollection
-          const mergedFeature = {
-            type: 'Feature',
-            properties: {
-              name: 'Visited Countries',
-              merged: true,
-              count: features.length,
-            },
-            geometry: {
-              type: 'MultiPolygon',
-              coordinates: [],
-            },
-          };
-
-          // 將所有國家的座標合併到 MultiPolygon 中
-          features.forEach((feature) => {
-            if (feature.geometry) {
-              if (feature.geometry.type === 'Polygon') {
-                mergedFeature.geometry.coordinates.push(feature.geometry.coordinates);
-              } else if (feature.geometry.type === 'MultiPolygon') {
-                mergedFeature.geometry.coordinates.push(...feature.geometry.coordinates);
-              }
-            }
-          });
-
-          return mergedFeature;
-        } catch (error) {
-          console.warn('[MapTab] 國家合併失敗，使用原始數據:', error);
-          return features[0]; // 如果合併失敗，返回第一個國家
-        }
-      };
-
-      /**
-       * 🎨 繪製世界地圖 - 合併已造訪的國家
-       */
-      const drawWorldMap = async () => {
-        if (!g || !worldData.value) {
-          console.error('[MapTab] 無法繪製地圖: g=', !!g, 'worldData=', !!worldData.value);
+      const drawPointsMap = async () => {
+        if (!g || !pointsData.value) {
+          console.error('[MapTab] 無法繪製地圖: g=', !!g, 'pointsData=', !!pointsData.value);
           return;
         }
 
         try {
-          // 過濾出只包含已造訪國家的數據
-          const visitedCountriesData = {
-            type: 'FeatureCollection',
-            features: worldData.value.features.filter((feature) => {
-              const countryName =
-                feature.properties.name || feature.properties.ADMIN || feature.properties.NAME;
-              // 只保留台灣和已造訪的國家
-              return (
-                dataStore.isHomeCountry(countryName) || dataStore.isCountryVisited(countryName)
-              );
-            }),
-          };
+          const features = pointsData.value.features || [];
+          console.log('[MapTab] 開始繪製點數據地圖，點數量:', features.length);
 
-          console.log(
-            '[MapTab] 開始繪製地圖，已造訪國家數量:',
-            visitedCountriesData.features.length
-          );
-
-          // 分離台灣和其他已造訪國家
-          const taiwanFeatures = visitedCountriesData.features.filter((feature) => {
-            const countryName =
-              feature.properties.name || feature.properties.ADMIN || feature.properties.NAME;
-            return dataStore.isHomeCountry(countryName);
-          });
-
-          const otherVisitedFeatures = visitedCountriesData.features.filter((feature) => {
-            const countryName =
-              feature.properties.name || feature.properties.ADMIN || feature.properties.NAME;
-            return dataStore.isCountryVisited(countryName) && !dataStore.isHomeCountry(countryName);
-          });
-
-          // 合併其他已造訪國家
-          const mergedVisitedCountries = mergeCountries(otherVisitedFeatures);
-
-          // 繪製台灣（使用 CSS 變數）
-          if (taiwanFeatures.length > 0) {
-            g.selectAll('path.taiwan')
-              .data(taiwanFeatures)
-              .enter()
-              .append('path')
-              .attr('class', 'taiwan')
-              .attr('d', path)
-              .style('fill', 'var(--my-color-taiwan)') // 台灣：使用 CSS 變數
-              .attr('stroke', 'none'); // 移除台灣邊界線
+          if (features.length === 0) {
+            console.warn('[MapTab] 沒有點數據可繪製');
+            return;
           }
 
-          // 繪製合併的已造訪國家（使用 CSS 變數）
-          if (mergedVisitedCountries) {
-            g.selectAll('path.visited-countries')
-              .data([mergedVisitedCountries])
-              .enter()
-              .append('path')
-              .attr('class', 'visited-countries')
-              .attr('d', path)
-              .style('fill', 'var(--my-color-visited-countries)') // 已造訪：使用 CSS 變數
-              .attr('stroke', 'none'); // 移除邊界線，讓合併的國家看起來像一個統一的形狀
-          }
+          // 計算 value 的範圍用於顏色映射
+          const values = features.map((f) => f.properties?.value || 0);
+          const minValue = Math.min(...values);
+          const maxValue = Math.max(...values);
 
-          console.log(
-            '[MapTab] 合併國家地圖繪製完成，台灣:',
-            taiwanFeatures.length,
-            '個，已造訪國家: 1個合併形狀'
-          );
+          // 創建顏色比例尺（使用藍色到紅色的漸變）
+          const colorScale = d3
+            .scaleSequential()
+            .domain([minValue, maxValue])
+            .interpolator(d3.interpolateViridis);
+
+          // 計算點的大小範圍（根據 value）
+          const minRadius = 1;
+          const maxRadius = 8;
+          const radiusScale = d3
+            .scaleLinear()
+            .domain([minValue, maxValue])
+            .range([minRadius, maxRadius]);
+
+          // 繪製點
+          const points = g.selectAll('circle.point').data(features, (d, i) => i);
+
+          // 進入的點
+          const enterPoints = points
+            .enter()
+            .append('circle')
+            .attr('class', 'point')
+            .attr('opacity', 0.7)
+            .attr('stroke', '#fff')
+            .attr('stroke-width', 0.5);
+
+          // 合併進入和更新的點
+          enterPoints
+            .merge(points)
+            .attr('cx', (d) => {
+              const coords = projection(d.geometry.coordinates);
+              return coords ? coords[0] : 0;
+            })
+            .attr('cy', (d) => {
+              const coords = projection(d.geometry.coordinates);
+              return coords ? coords[1] : 0;
+            })
+            .attr('r', (d) => {
+              const value = d.properties?.value || 0;
+              return radiusScale(value);
+            })
+            .attr('fill', (d) => {
+              const value = d.properties?.value || 0;
+              return colorScale(value);
+            });
+
+          // 移除退出的點
+          points.exit().remove();
+
+          console.log('[MapTab] 點數據地圖繪製完成，點數量:', features.length);
+          console.log('[MapTab] Value 範圍:', minValue, '到', maxValue);
 
           // 繪製距離圓圈
           drawDistanceRings();
         } catch (error) {
-          console.error('[MapTab] 合併國家地圖繪製失敗:', error);
+          console.error('[MapTab] 點數據地圖繪製失敗:', error);
         }
       };
 
@@ -328,7 +286,7 @@
 
       /**
        * 🌍 導航到指定位置
-       * 使用方位等距投影，將選定的國家設為地圖中心
+       * 使用方位等距投影，將選定的位置設為地圖中心
        * 地球大小保持不變，只改變旋轉中心
        */
       const navigateToLocation = (center) => {
@@ -345,12 +303,19 @@
         const padding = 32;
         const availableWidth = width - padding * 2;
         const availableHeight = height - padding * 2;
-        const scale = Math.min(availableWidth, availableHeight) / 6;
+        // 對於點數據，使用更大的縮放比例以便更好地顯示
+        const scale = Math.min(availableWidth, availableHeight) / 2;
 
         projection.rotate([-center[0], -center[1]]).scale(scale);
 
-        // 更新所有路徑
-        g.selectAll('path.country').attr('d', path);
+        // 更新所有點的位置
+        g.selectAll('circle.point').attr('cx', (d) => {
+          const coords = projection(d.geometry.coordinates);
+          return coords ? coords[0] : 0;
+        }).attr('cy', (d) => {
+          const coords = projection(d.geometry.coordinates);
+          return coords ? coords[1] : 0;
+        });
 
         // 更新距離圓圈
         drawDistanceRings();
@@ -375,12 +340,19 @@
         const padding = 32;
         const availableWidth = width - padding * 2;
         const availableHeight = height - padding * 2;
-        const scale = Math.min(availableWidth, availableHeight) / 6;
+        // 對於點數據，使用更大的縮放比例以便更好地顯示
+        const scale = Math.min(availableWidth, availableHeight) / 2;
 
         projection.translate([width / 2, height / 2]).scale(scale);
 
-        // 更新所有路徑
-        g.selectAll('path.country').attr('d', path);
+        // 更新所有點的位置
+        g.selectAll('circle.point').attr('cx', (d) => {
+          const coords = projection(d.geometry.coordinates);
+          return coords ? coords[0] : 0;
+        }).attr('cy', (d) => {
+          const coords = projection(d.geometry.coordinates);
+          return coords ? coords[1] : 0;
+        });
 
         // 更新距離圓圈
         drawDistanceRings();
@@ -396,10 +368,10 @@
         let attempts = 0;
         const maxAttempts = 20;
 
-        // 先載入世界地圖數據
-        const loaded = await loadWorldData();
+        // 先載入點數據
+        const loaded = await loadPointsData();
         if (!loaded) {
-          console.error('[MapTab] 無法載入世界地圖數據');
+          console.error('[MapTab] 無法載入點數據');
           return;
         }
 
@@ -413,8 +385,8 @@
           console.log(`[MapTab] 嘗試創建地圖 (${attempts}/${maxAttempts})`);
 
           if (createMap()) {
-            console.log('[MapTab] 地圖創建成功，開始繪製世界地圖');
-            await drawWorldMap();
+            console.log('[MapTab] 地圖創建成功，開始繪製點數據地圖');
+            await drawPointsMap();
           } else {
             console.log('[MapTab] 地圖創建失敗，100ms 後重試');
             setTimeout(tryCreateMap, 100);
@@ -504,15 +476,12 @@
 
   /* 距離圓圈使用 D3.js 繪製，包含 5000km 虛線圓圈和地球邊界實線圓圈 */
 
-  :deep(.country) {
-    transition: fill 0.2s ease;
+  :deep(.point) {
+    transition: r 0.2s ease, opacity 0.2s ease;
   }
 
-  /* 國家懸停效果已移除 */
-
-  :deep(.city-marker) {
-    transition: r 0.2s ease;
+  :deep(.point:hover) {
+    opacity: 1;
+    stroke-width: 1;
   }
-
-  /* 城市標記懸停效果已移除 */
 </style>

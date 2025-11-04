@@ -1,4 +1,4 @@
-# 🌍 30DayMapChallenge-04_Data-challenge-My-Data - 個人旅遊足跡地圖
+# 🌍 30DayMapChallenge-29_Raster - 個人旅遊足跡地圖
 
 一個基於 Vue
 3 和 D3.js 的互動式世界地圖應用程式，展示個人旅遊足跡和已造訪國家。使用方位等距投影技術，以台灣為中心點，呈現個人化的世界旅遊經驗。
@@ -153,7 +153,7 @@ assets/css/
 ## 📁 專案結構
 
 ```
-30DayMapChallenge-04_Data-challenge-My-Data/
+30DayMapChallenge-29_Raster/
 ├── 📁 public/                          # 靜態資源目錄
 │   ├── 📄 index.html                   # HTML 入口文件
 │   ├── 📄 404.html                     # 404 錯誤頁面
@@ -241,13 +241,13 @@ assets/css/
 
 ```bash
 # 使用 HTTPS
-git clone https://github.com/kevin7261/30DayMapChallenge-04_Data-challenge-My-Data.git
+git clone https://github.com/kevin7261/30DayMapChallenge-29_Raster.git
 
 # 或使用 SSH
-git clone git@github.com:kevin7261/30DayMapChallenge-04_Data-challenge-My-Data.git
+git clone git@github.com:kevin7261/30DayMapChallenge-29_Raster.git
 
 # 進入專案目錄
-cd 30DayMapChallenge-04_Data-challenge-My-Data
+cd 30DayMapChallenge-29_Raster
 ```
 
 #### 2. 安裝依賴
@@ -294,9 +294,9 @@ pnpm build
 #### 本地訪問
 
 - **本地地址**:
-  `http://localhost:8080/30DayMapChallenge-04_Data-challenge-My-Data/`
+  `http://localhost:8080/30DayMapChallenge-29_Raster/`
 - **網路地址**:
-  `http://[your-ip]:8080/30DayMapChallenge-04_Data-challenge-My-Data/`
+  `http://[your-ip]:8080/30DayMapChallenge-29_Raster/`
 
 #### 熱重載
 
@@ -615,7 +615,7 @@ npm run deploy
 #### 4. 訪問網站
 
 ```
-https://kevin7261.github.io/30DayMapChallenge-04_Data-challenge-My-Data/
+https://kevin7261.github.io/30DayMapChallenge-29_Raster/
 ```
 
 ### 其他部署選項
@@ -625,14 +625,14 @@ https://kevin7261.github.io/30DayMapChallenge-04_Data-challenge-My-Data/
 1. 連接 GitHub 倉庫
 2. 設定構建命令: `npm run build`
 3. 設定發布目錄: `dist`
-4. 設定基礎路徑: `/30DayMapChallenge-04_Data-challenge-My-Data/`
+4. 設定基礎路徑: `/30DayMapChallenge-29_Raster/`
 
 #### Vercel 部署
 
 1. 連接 GitHub 倉庫
 2. 設定構建命令: `npm run build`
 3. 設定輸出目錄: `dist`
-4. 設定基礎路徑: `/30DayMapChallenge-04_Data-challenge-My-Data/`
+4. 設定基礎路徑: `/30DayMapChallenge-29_Raster/`
 
 ### 環境變數
 
@@ -1043,7 +1043,7 @@ chore: 構建過程或輔助工具的變動
 - **電子郵件**: [your.email@example.com]
 - **GitHub**: [kevin7261](https://github.com/kevin7261)
 - **專案連結**:
-  [30DayMapChallenge-04_Data-challenge-My-Data](https://github.com/kevin7261/30DayMapChallenge-04_Data-challenge-My-Data)
+  [30DayMapChallenge-29_Raster](https://github.com/kevin7261/30DayMapChallenge-29_Raster)
 
 ## 🙏 致謝
 
@@ -1067,6 +1067,6 @@ chore: 構建過程或輔助工具的變動
 
 ---
 
-**30DayMapChallenge-04_Data-challenge-My-Data** - 探索世界國家的點之美 🌍✨
+**30DayMapChallenge-29_Raster** - 探索世界國家的點之美 🌍✨
 
 _最後更新: 2024年12月_
