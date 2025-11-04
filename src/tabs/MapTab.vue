@@ -143,7 +143,7 @@
       };
 
       /**
-       * 🎨 繪製點數據地圖
+       * 🎨 繪製點數據地圖 - 按緯度繪製橫線
        */
       const drawPointsMap = async () => {
         if (!g || !pointsData.value) {
@@ -165,59 +165,97 @@
           const minValue = Math.min(...values);
           const maxValue = Math.max(...values);
 
-          // 創建顏色比例尺（使用藍色到紅色的漸變）
+          // 創建顏色比例尺
           const colorScale = d3
             .scaleSequential()
             .domain([minValue, maxValue])
             .interpolator(d3.interpolateViridis);
 
-          // 計算點的大小範圍（根據 value）
-          const minRadius = 1;
-          const maxRadius = 8;
-          const radiusScale = d3
+          // 計算線條寬度範圍（根據 value）
+          const minStrokeWidth = 0.5;
+          const maxStrokeWidth = 3;
+          const strokeWidthScale = d3
             .scaleLinear()
             .domain([minValue, maxValue])
-            .range([minRadius, maxRadius]);
+            .range([minStrokeWidth, maxStrokeWidth]);
 
-          // 繪製點
-          const points = g.selectAll('circle.point').data(features, (d, i) => i);
+          // 按緯度（y座標）分組
+          const latGroups = new Map();
+          features.forEach((feature) => {
+            const lat = feature.geometry.coordinates[1]; // 緯度
+            const lon = feature.geometry.coordinates[0]; // 經度
+            const value = feature.properties?.value || 0;
 
-          // 進入的點
-          const enterPoints = points
+            if (!latGroups.has(lat)) {
+              latGroups.set(lat, {
+                lat,
+                lons: [],
+                values: [],
+              });
+            }
+
+            const group = latGroups.get(lat);
+            group.lons.push(lon);
+            group.values.push(value);
+          });
+
+          // 轉換為線條數據
+          const lineData = Array.from(latGroups.values()).map((group) => {
+            const minLon = Math.min(...group.lons);
+            const maxLon = Math.max(...group.lons);
+            // 使用該緯度上所有點的平均值或最大值來決定線條顏色和寬度
+            const avgValue = group.values.reduce((a, b) => a + b, 0) / group.values.length;
+            const maxValueInGroup = Math.max(...group.values);
+
+            return {
+              lat: group.lat,
+              minLon,
+              maxLon,
+              avgValue,
+              maxValue: maxValueInGroup,
+            };
+          });
+
+          // 繪製橫線
+          const lines = g.selectAll('line.horizontal-line').data(lineData, (d) => d.lat);
+
+          // 進入的線條
+          const enterLines = lines
             .enter()
-            .append('circle')
-            .attr('class', 'point')
-            .attr('opacity', 0.7)
-            .attr('stroke', '#fff')
-            .attr('stroke-width', 0.5);
+            .append('line')
+            .attr('class', 'horizontal-line')
+            .attr('opacity', 0.8);
 
-          // 合併進入和更新的點
-          enterPoints
-            .merge(points)
-            .attr('cx', (d) => {
-              const coords = projection(d.geometry.coordinates);
+          // 合併進入和更新的線條
+          enterLines
+            .merge(lines)
+            .attr('x1', (d) => {
+              const coords = projection([d.minLon, d.lat]);
               return coords ? coords[0] : 0;
             })
-            .attr('cy', (d) => {
-              const coords = projection(d.geometry.coordinates);
+            .attr('y1', (d) => {
+              const coords = projection([d.minLon, d.lat]);
               return coords ? coords[1] : 0;
             })
-            .attr('r', (d) => {
-              const value = d.properties?.value || 0;
-              return radiusScale(value);
+            .attr('x2', (d) => {
+              const coords = projection([d.maxLon, d.lat]);
+              return coords ? coords[0] : 0;
             })
-            .attr('fill', (d) => {
-              const value = d.properties?.value || 0;
-              return colorScale(value);
-            });
+            .attr('y2', (d) => {
+              const coords = projection([d.maxLon, d.lat]);
+              return coords ? coords[1] : 0;
+            })
+            .attr('stroke', (d) => colorScale(d.avgValue))
+            .attr('stroke-width', (d) => strokeWidthScale(d.maxValue))
+            .attr('stroke-linecap', 'round');
 
-          // 移除退出的點
-          points.exit().remove();
+          // 移除退出的線條
+          lines.exit().remove();
 
-          console.log('[MapTab] 點數據地圖繪製完成，點數量:', features.length);
+          console.log('[MapTab] 橫線地圖繪製完成，線條數量:', lineData.length);
           console.log('[MapTab] Value 範圍:', minValue, '到', maxValue);
         } catch (error) {
-          console.error('[MapTab] 點數據地圖繪製失敗:', error);
+          console.error('[MapTab] 橫線地圖繪製失敗:', error);
         }
       };
 
@@ -247,12 +285,18 @@
 
         projection.rotate([-center[0], -center[1]]).scale(scale);
 
-        // 更新所有點的位置
-        g.selectAll('circle.point').attr('cx', (d) => {
-          const coords = projection(d.geometry.coordinates);
+        // 更新所有橫線的位置
+        g.selectAll('line.horizontal-line').attr('x1', (d) => {
+          const coords = projection([d.minLon, d.lat]);
           return coords ? coords[0] : 0;
-        }).attr('cy', (d) => {
-          const coords = projection(d.geometry.coordinates);
+        }).attr('y1', (d) => {
+          const coords = projection([d.minLon, d.lat]);
+          return coords ? coords[1] : 0;
+        }).attr('x2', (d) => {
+          const coords = projection([d.maxLon, d.lat]);
+          return coords ? coords[0] : 0;
+        }).attr('y2', (d) => {
+          const coords = projection([d.maxLon, d.lat]);
           return coords ? coords[1] : 0;
         });
 
@@ -281,12 +325,18 @@
 
         projection.translate([width / 2, height / 2]).scale(scale);
 
-        // 更新所有點的位置
-        g.selectAll('circle.point').attr('cx', (d) => {
-          const coords = projection(d.geometry.coordinates);
+        // 更新所有橫線的位置
+        g.selectAll('line.horizontal-line').attr('x1', (d) => {
+          const coords = projection([d.minLon, d.lat]);
           return coords ? coords[0] : 0;
-        }).attr('cy', (d) => {
-          const coords = projection(d.geometry.coordinates);
+        }).attr('y1', (d) => {
+          const coords = projection([d.minLon, d.lat]);
+          return coords ? coords[1] : 0;
+        }).attr('x2', (d) => {
+          const coords = projection([d.maxLon, d.lat]);
+          return coords ? coords[0] : 0;
+        }).attr('y2', (d) => {
+          const coords = projection([d.maxLon, d.lat]);
           return coords ? coords[1] : 0;
         });
 
@@ -408,12 +458,12 @@
 
   /* 距離圓圈使用 D3.js 繪製，包含 5000km 虛線圓圈和地球邊界實線圓圈 */
 
-  :deep(.point) {
-    transition: r 0.2s ease, opacity 0.2s ease;
+  :deep(.horizontal-line) {
+    transition: stroke-width 0.2s ease, opacity 0.2s ease;
   }
 
-  :deep(.point:hover) {
+  :deep(.horizontal-line:hover) {
     opacity: 1;
-    stroke-width: 1;
+    stroke-width: 4;
   }
 </style>
