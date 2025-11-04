@@ -97,12 +97,13 @@
           const padding = 32;
           const availableWidth = width - padding * 2;
           const availableHeight = height - padding * 2;
-          // 對於點數據，使用更大的縮放比例以便更好地顯示
-          const scale = Math.min(availableWidth, availableHeight) / 2;
+          // 調整縮放比例以顯示整個點數據範圍（經度跨度約1.88度，緯度跨度約3.25度）
+          // 使用較小的除數以獲得更大的縮放（地圖更大）
+          const scale = Math.min(availableWidth, availableHeight) / 0.08;
 
           projection = d3
             .geoAzimuthalEquidistant()
-            .rotate([-120.982025, -23.973875]) // 以台灣地理中心為中心
+            .rotate([-121.057677, -23.608688]) // 以點數據中心為中心
             .scale(scale) // 使用計算後的縮放比例
             .translate([width / 2, height / 2])
             .clipAngle(180);
@@ -139,65 +140,6 @@
           console.error('[MapTab] D3 地圖創建失敗:', error);
           return false;
         }
-      };
-
-      // 距離圓圈相關變數
-      let ringsGroup = null;
-
-      /**
-       * 🔵 繪製以投影中心為圓心的同心距離圓
-       * 每 5000 公里一圈，淺灰虛線，永遠位於地圖上層
-       * 最多繪製到 15000 公里（3 圈）
-       * 地球邊界（180°）繪製實線圓圈
-       */
-      const drawDistanceRings = () => {
-        if (!svg || !projection || !mapContainer.value) return;
-
-        const rect = mapContainer.value.getBoundingClientRect();
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
-        const scale = projection.scale();
-
-        // 地球半徑（公里）
-        const earthRadiusMeters = 6371000;
-        const stepMeters = 5000000; // 5000 公里
-        const maxDistanceMeters = 15000000; // 15000 公里
-
-        const rings = [];
-        for (let i = 1; i <= 10; i++) {
-          const distanceMeters = stepMeters * i;
-          if (distanceMeters > maxDistanceMeters) break;
-          const radiusPx = scale * (distanceMeters / earthRadiusMeters);
-          rings.push({ index: i, radiusPx, type: 'distance' });
-        }
-
-        // 加入地球邊界圓（180° = π * R，在方位等距投影中對應到 scale * π）
-        const earthBoundaryRadiusPx = scale * Math.PI;
-        rings.push({ index: 999, radiusPx: earthBoundaryRadiusPx, type: 'boundary' });
-
-        if (!ringsGroup) {
-          ringsGroup = svg
-            .append('g')
-            .attr('class', 'distance-rings')
-            .style('pointer-events', 'none');
-        }
-
-        const selection = ringsGroup.selectAll('circle.ring').data(rings, (d) => d.index);
-
-        selection
-          .enter()
-          .append('circle')
-          .attr('class', 'ring')
-          .attr('fill', 'none')
-          .merge(selection)
-          .attr('cx', cx)
-          .attr('cy', cy)
-          .attr('r', (d) => d.radiusPx)
-          .attr('stroke', (d) => (d.type === 'boundary' ? '#666666' : '#cccccc'))
-          .attr('stroke-width', (d) => (d.type === 'boundary' ? 2 : 1))
-          .attr('stroke-dasharray', (d) => (d.type === 'boundary' ? 'none' : '6,6'));
-
-        selection.exit().remove();
       };
 
       /**
@@ -274,9 +216,6 @@
 
           console.log('[MapTab] 點數據地圖繪製完成，點數量:', features.length);
           console.log('[MapTab] Value 範圍:', minValue, '到', maxValue);
-
-          // 繪製距離圓圈
-          drawDistanceRings();
         } catch (error) {
           console.error('[MapTab] 點數據地圖繪製失敗:', error);
         }
@@ -303,8 +242,8 @@
         const padding = 32;
         const availableWidth = width - padding * 2;
         const availableHeight = height - padding * 2;
-        // 對於點數據，使用更大的縮放比例以便更好地顯示
-        const scale = Math.min(availableWidth, availableHeight) / 2;
+        // 調整縮放比例以顯示整個點數據範圍
+        const scale = Math.min(availableWidth, availableHeight) / 0.08;
 
         projection.rotate([-center[0], -center[1]]).scale(scale);
 
@@ -316,9 +255,6 @@
           const coords = projection(d.geometry.coordinates);
           return coords ? coords[1] : 0;
         });
-
-        // 更新距離圓圈
-        drawDistanceRings();
 
         console.log('[MapTab] 地圖導航完成，中心:', center);
       };
@@ -340,8 +276,8 @@
         const padding = 32;
         const availableWidth = width - padding * 2;
         const availableHeight = height - padding * 2;
-        // 對於點數據，使用更大的縮放比例以便更好地顯示
-        const scale = Math.min(availableWidth, availableHeight) / 2;
+        // 調整縮放比例以顯示整個點數據範圍
+        const scale = Math.min(availableWidth, availableHeight) / 0.08;
 
         projection.translate([width / 2, height / 2]).scale(scale);
 
@@ -353,9 +289,6 @@
           const coords = projection(d.geometry.coordinates);
           return coords ? coords[1] : 0;
         });
-
-        // 更新距離圓圈
-        drawDistanceRings();
 
         console.log('[MapTab] 地圖尺寸更新完成');
       };
@@ -443,7 +376,6 @@
         path = null;
         zoom = null;
         g = null;
-        ringsGroup = null;
         isMapReady.value = false;
       });
 
