@@ -255,7 +255,7 @@
               const group = groups.get(latKey);
               group.points.push({ lon, lat, value, properties: { ...feature.properties } });
             } else {
-              // 按經度（x座標）分組
+              // x軸模式：按經度分組（同一經度的點組成一條垂直線）
               const lonKey = gridX !== undefined ? `grid_${gridX}` : Math.round(lon * 100) / 100;
 
               if (!groups.has(lonKey)) {
@@ -279,10 +279,10 @@
             // 根據方向排序
             let sortedPoints;
             if (group.isYAxis) {
-              // y軸模式：按經度排序（從左到右）
+              // y軸模式：按經度排序（從左到右，西到東）
               sortedPoints = group.points.sort((a, b) => a.lon - b.lon);
             } else {
-              // x軸模式：按緯度排序（從下到上）
+              // x軸模式：按緯度排序（從南到北），因為同一組的點經度相同
               sortedPoints = group.points.sort((a, b) => a.lat - b.lat);
             }
 
@@ -329,25 +329,29 @@
                 closedPoints.push(...sortedPoints);
                 closedPoints.push(lastBasePoint);
               } else {
-                // x軸模式：基準是經度（垂直軸）
+                // x軸模式：基準是經度（垂直軸），按緯度從南到北排序
+                // 同一組的點經度相同（group.coord），但緯度不同
                 // 計算緯度間距（相鄰點的緯度差）
                 const latStep =
                   sortedPoints.length > 1
                     ? (lastPoint.lat - firstPoint.lat) / (sortedPoints.length - 1)
                     : 0.01; // 如果只有一個點，使用默認值
 
-                // 第一個基準點：基準經度，第一個點的緯度減去一個刻度，value=0
+                // 基準經度使用 group.coord（同一組的點經度都相同）
+                const baseLon = group.coord;
+
+                // 第一個基準點：基準經度，第一個點的緯度減去一個刻度（南邊），value=0
                 const firstBasePoint = {
-                  lon: group.coord,
+                  lon: baseLon, // 使用基準經度
                   lat: firstPoint.lat - latStep,
                   value: 0,
                   isBasePoint: true, // 標記為基準點
                   properties: { ...(firstPoint.properties || {}), value: 0, isBasePoint: true },
                 };
 
-                // 最後一個基準點：基準經度，最後一個點的緯度加上一個刻度，value=0
+                // 最後一個基準點：基準經度，最後一個點的緯度加上一個刻度（北邊），value=0
                 const lastBasePoint = {
-                  lon: group.coord,
+                  lon: baseLon, // 使用基準經度
                   lat: lastPoint.lat + latStep,
                   value: 0,
                   isBasePoint: true, // 標記為基準點
@@ -371,6 +375,15 @@
               maxValue: maxValueInGroup,
             };
           });
+
+          // x軸模式：按經度排序線條，經度越大（東邊）的線越晚繪製（在最上面）
+          if (drawDirection.value === 'x') {
+            lineData.sort((a, b) => {
+              // 使用每條線的基準經度（group.coord）排序
+              // 經度越大（東邊）的線越晚繪製（排序值越大）
+              return a.coord - b.coord;
+            });
+          }
 
           // 創建座標到折線顏色的映射，用於點的顏色
           const coordToColorMap = new Map();
