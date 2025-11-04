@@ -176,9 +176,9 @@
           // 線條寬度統一為2px，不再需要動態計算
 
           // 計算高度比例尺（value 映射到像素高度）
-          // 統一使用地圖高度的 7.5% 作為最大高度偏移（放大1.5倍：從5%到7.5%）
+          // 統一使用地圖高度的 10% 作為最大高度偏移（放大2倍：從5%到10%）
           const rect = mapContainer.value.getBoundingClientRect();
-          const maxHeightOffset = rect.height * 0.075; // 統一放大1.5倍
+          const maxHeightOffset = rect.height * 0.1; // 統一放大2倍
           const heightScale = d3
             .scaleLinear()
             .domain([minValue, maxValue])
@@ -247,15 +247,78 @@
               sortedPoints.reduce((sum, p) => sum + p.value, 0) / sortedPoints.length;
             const maxValueInGroup = Math.max(...sortedPoints.map((p) => p.value));
 
-            // 直接使用所有數據點，不添加頭尾虛擬點
-            const closedPoints = [...sortedPoints];
+            // 在頭尾添加基準線上的點（連接到原點）
+            const closedPoints = [];
+
+            if (sortedPoints.length > 0) {
+              const firstPoint = sortedPoints[0];
+              const lastPoint = sortedPoints[sortedPoints.length - 1];
+
+              if (group.isYAxis) {
+                // y軸模式：基準是緯度（水平軸）
+                // 計算經度間距（相鄰點的經度差）
+                const lonStep =
+                  sortedPoints.length > 1
+                    ? (lastPoint.lon - firstPoint.lon) / (sortedPoints.length - 1)
+                    : 0.01; // 如果只有一個點，使用默認值
+
+                // 第一個基準點：第一個點的經度減去一個刻度，基準緯度，value=0
+                const firstBasePoint = {
+                  lon: firstPoint.lon - lonStep,
+                  lat: group.coord,
+                  value: 0,
+                  isBasePoint: true, // 標記為基準點
+                };
+
+                // 最後一個基準點：最後一個點的經度加上一個刻度，基準緯度，value=0
+                const lastBasePoint = {
+                  lon: lastPoint.lon + lonStep,
+                  lat: group.coord,
+                  value: 0,
+                  isBasePoint: true, // 標記為基準點
+                };
+
+                // 第一個基準點 -> 所有數據點 -> 最後一個基準點
+                closedPoints.push(firstBasePoint);
+                closedPoints.push(...sortedPoints);
+                closedPoints.push(lastBasePoint);
+              } else {
+                // x軸模式：基準是經度（垂直軸）
+                // 計算緯度間距（相鄰點的緯度差）
+                const latStep =
+                  sortedPoints.length > 1
+                    ? (lastPoint.lat - firstPoint.lat) / (sortedPoints.length - 1)
+                    : 0.01; // 如果只有一個點，使用默認值
+
+                // 第一個基準點：基準經度，第一個點的緯度減去一個刻度，value=0
+                const firstBasePoint = {
+                  lon: group.coord,
+                  lat: firstPoint.lat - latStep,
+                  value: 0,
+                  isBasePoint: true, // 標記為基準點
+                };
+
+                // 最後一個基準點：基準經度，最後一個點的緯度加上一個刻度，value=0
+                const lastBasePoint = {
+                  lon: group.coord,
+                  lat: lastPoint.lat + latStep,
+                  value: 0,
+                  isBasePoint: true, // 標記為基準點
+                };
+
+                // 第一個基準點 -> 所有數據點 -> 最後一個基準點
+                closedPoints.push(firstBasePoint);
+                closedPoints.push(...sortedPoints);
+                closedPoints.push(lastBasePoint);
+              }
+            }
 
             return {
-              coord: group.coord, // 座標代表值（緯度或經度）
-              gridCoord: group.gridCoord, // 網格座標
-              isYAxis: group.isYAxis, // 是否為y軸模式
-              points: sortedPoints, // 原始點（用於tooltip）
-              closedPoints: closedPoints, // 閉合的點（用於繪製）
+              coord: group.coord,
+              gridCoord: group.gridCoord,
+              isYAxis: group.isYAxis,
+              points: sortedPoints,
+              closedPoints: closedPoints, // 包含基準點和數據點
               avgValue,
               maxValue: maxValueInGroup,
             };
@@ -271,30 +334,28 @@
             coordToColorMap.set(coordKey, colorScale(line.avgValue));
           });
 
-          // 創建折線生成器（根據繪製方向調整高度偏移）
+          // 創建折線生成器（依軸向偏移：y軸向上、x軸向左）
           const lineGenerator = d3
             .line()
             .x((d) => {
               const baseCoords = projection([d.lon, d.lat]);
               if (!baseCoords) return 0;
-              // y軸模式：x座標正常
-              // x軸模式：x座標向右偏移（x增加），value越大，點越右
+              // x軸模式：x 座標向左偏移；y軸模式：x 座標正常
               if (drawDirection.value === 'x') {
-                return baseCoords[0] + heightScale(d.value);
+                return baseCoords[0] - heightScale(d.value);
               }
               return baseCoords[0];
             })
             .y((d) => {
               const baseCoords = projection([d.lon, d.lat]);
               if (!baseCoords) return 0;
-              // y軸模式：y座標向上偏移（y減少），value越大，點越高
-              // x軸模式：y座標正常
+              // y軸模式：y 座標向上偏移；x軸模式：y 座標正常
               if (drawDirection.value === 'y') {
                 return baseCoords[1] - heightScale(d.value);
               }
               return baseCoords[1];
             })
-            .curve(d3.curveCatmullRom.alpha(0.5)); // 使用Catmull-Rom曲線，alpha=0.5
+            .curve(d3.curveCardinal.tension(0)); // 使用 curveCardinal.tension(0)
 
           // 繪製折線
           const lines = g
@@ -310,12 +371,18 @@
             .attr('fill', 'none')
             .style('pointer-events', 'none'); // 折線不攔截鼠標事件，讓點可以接收事件
 
-          // 合併進入和更新的線條 - 使用有質感的金色，4px寬度
+          // 合併進入和更新的線條 - 繪製黃線（數據線，點線樣式）
           enterLines
             .merge(lines)
-            .attr('d', (d) => lineGenerator(d.closedPoints)) // 使用閉合的點
-            .attr('stroke', '#FFC125') // 更亮的金色（Goldenrod）
-            .attr('stroke-width', 4) // 統一4px
+            .attr('d', (d) => {
+              if (d && d.closedPoints && d.closedPoints.length > 0) {
+                // 使用包含數據點和基準點的點（用於繪製黃線）
+                return lineGenerator(d.closedPoints);
+              }
+              return '';
+            })
+            .attr('stroke', '#FFC125') // 金色邊框
+            .attr('stroke-width', 4) // 4px寬度
             .attr('stroke-linecap', 'round')
             .attr('stroke-linejoin', 'round')
             .attr('opacity', 0.95)
@@ -324,6 +391,156 @@
 
           // 移除退出的線條
           lines.exit().remove();
+
+          // 不再單獨繪製黑線，因為已經包含在閉合多邊形中
+
+          // 繪製所有點（包括基準點和數據點）
+          // 收集所有 closedPoints 中的點
+          const allPoints = [];
+          lineData.forEach((line) => {
+            if (line.closedPoints && line.closedPoints.length > 0) {
+              line.closedPoints.forEach((point) => {
+                // 添加點數據，包含必要的屬性
+                // 確保點有正確的 lon 和 lat 屬性
+                const pointData = {
+                  lon: point.lon !== undefined ? point.lon : point.geometry?.coordinates[0],
+                  lat: point.lat !== undefined ? point.lat : point.geometry?.coordinates[1],
+                  value: point.value !== undefined ? point.value : point.properties?.value || 0,
+                  isBasePoint:
+                    point.isBasePoint !== undefined
+                      ? point.isBasePoint
+                      : point.value === 0 || point.properties?.value === 0,
+                };
+                // 確保 lon 和 lat 是有效的數字
+                if (
+                  pointData.lon != null &&
+                  pointData.lat != null &&
+                  !isNaN(pointData.lon) &&
+                  !isNaN(pointData.lat)
+                ) {
+                  allPoints.push({
+                    ...pointData,
+                    geometry: {
+                      coordinates: [pointData.lon, pointData.lat],
+                    },
+                    properties: {
+                      value: pointData.value,
+                      isBasePoint: pointData.isBasePoint,
+                    },
+                  });
+                }
+              });
+            }
+          });
+
+          console.log(
+            `[MapTab] 繪製方向: ${drawDirection.value}, 收集到的點數量: ${allPoints.length}, 線條數量: ${lineData.length}`
+          );
+
+          // 創建或獲取點組
+          let pointsGroup = g.select('g.points-group');
+          if (pointsGroup.empty()) {
+            pointsGroup = g.append('g').attr('class', 'points-group');
+          }
+
+          // 選擇所有點
+          // 使用更唯一的鍵來識別點（包括經緯度和value，避免重複）
+          const points = pointsGroup.selectAll('circle.data-point').data(allPoints, (d, i) => {
+            const lon = d.geometry.coordinates[0];
+            const lat = d.geometry.coordinates[1];
+            const value = d.properties?.value || 0;
+            const isBasePoint = d.properties?.isBasePoint || false;
+            return `${drawDirection.value}_${lon}_${lat}_${value}_${isBasePoint}_${i}`;
+          });
+
+          // 進入的點
+          const enterPoints = points
+            .enter()
+            .append('circle')
+            .attr('class', 'data-point')
+            .attr('r', 3)
+            .style('pointer-events', 'all')
+            .style('cursor', 'pointer');
+
+          // 合併進入和更新的點
+          enterPoints
+            .merge(points)
+            .attr('cx', (d) => {
+              const lon = d.geometry.coordinates[0];
+              const lat = d.geometry.coordinates[1];
+              const coords = projection([lon, lat]);
+              if (!coords || isNaN(coords[0]) || isNaN(coords[1])) {
+                console.warn(`[MapTab] 無法投影點: lon=${lon}, lat=${lat}`);
+                return 0;
+              }
+
+              // x軸模式：x 座標向左偏移；y軸模式：x 座標正常
+              const value = d.properties?.value || 0;
+              if (drawDirection.value === 'x') {
+                return coords[0] - heightScale(value);
+              }
+              return coords[0];
+            })
+            .attr('cy', (d) => {
+              const lon = d.geometry.coordinates[0];
+              const lat = d.geometry.coordinates[1];
+              const coords = projection([lon, lat]);
+              if (!coords || isNaN(coords[0]) || isNaN(coords[1])) {
+                return 0;
+              }
+
+              // y軸模式：y 座標向上偏移；x軸模式：y 座標正常
+              const value = d.properties?.value || 0;
+              if (drawDirection.value === 'y') {
+                return coords[1] - heightScale(value);
+              }
+              return coords[1];
+            })
+            .attr('fill', (d) => {
+              const value = d.properties?.value || 0;
+              const isBasePoint = d.properties?.isBasePoint || value === 0;
+              // 基準點（前後添加的點）畫黑色，數據點畫金色
+              return isBasePoint ? '#000000' : '#FFC125';
+            })
+            .attr('stroke', '#fff') // 所有點都用白色邊框
+            .attr('stroke-width', 1)
+            .attr('opacity', 0.95);
+
+          // 移除退出的點
+          points.exit().remove();
+
+          // 添加hover事件處理
+          pointsGroup
+            .selectAll('circle.data-point')
+            .on('mouseover', function (event, d) {
+              const value = d.properties?.value || 0;
+              // 基準點不顯示tooltip
+              if (value === 0) {
+                return;
+              }
+
+              const tooltip = d3.select('.map-tooltip');
+              tooltip
+                .style('display', 'block')
+                .style('visibility', 'visible')
+                .style('opacity', '1')
+                .html(`Value: ${value.toFixed(2)}`)
+                .style('left', event.pageX + 10 + 'px')
+                .style('top', event.pageY - 10 + 'px');
+            })
+            .on('mousemove', function (event, d) {
+              const value = d.properties?.value || 0;
+              if (value === 0) {
+                return;
+              }
+
+              const tooltip = d3.select('.map-tooltip');
+              tooltip.style('left', event.pageX + 10 + 'px').style('top', event.pageY - 10 + 'px');
+            })
+            .on('mouseout', function () {
+              const tooltip = d3.select('.map-tooltip');
+              tooltip.style('opacity', '0').style('display', 'none').style('visibility', 'hidden');
+            });
 
           // 創建tooltip元素（如果不存在）
           let tooltip = d3.select('body').select('.map-tooltip');
@@ -355,193 +572,12 @@
             console.log('[MapTab] Tooltip element already exists'); // 調試日誌
           }
 
-          // 繪製點並添加hover效果
-          // 確保點在折線之上，使用一個新的group（如果不存在則創建）
-          // 如果已存在，先移除再重新添加，確保在最上層
-          let pointsGroup = g.select('g.points-group');
-          if (!pointsGroup.empty()) {
-            pointsGroup.remove();
-          }
-          // 重新創建pointsGroup，確保在最後（最上層）
-          pointsGroup = g.append('g').attr('class', 'points-group');
-
-          // 畫所有點，不過濾奇數
-          const points = pointsGroup.selectAll('circle.data-point').data(features, (d) => {
-            // 使用經緯度作為唯一標識
-            return `${d.geometry.coordinates[0]}_${d.geometry.coordinates[1]}`;
-          });
-
-          // 定義hover事件處理函數
-          const handleMouseover = function (event, d) {
-            event.stopPropagation();
-
-            const value = d.properties?.value || 0;
-            const lat = d.geometry.coordinates[1];
-            const lon = d.geometry.coordinates[0];
-
-            console.log('[MapTab] Mouseover triggered, value:', value); // 調試日誌
-
-            // 計算tooltip位置，避免超出視窗邊界
-            const tooltipWidth = 180;
-            const tooltipHeight = 80;
-            const padding = 10;
-            let left = event.pageX + padding;
-            let top = event.pageY - padding;
-
-            // 如果超出右邊界，顯示在左側
-            if (left + tooltipWidth > window.innerWidth) {
-              left = event.pageX - tooltipWidth - padding;
-            }
-
-            // 如果超出下邊界，顯示在上方
-            if (top + tooltipHeight > window.innerHeight) {
-              top = event.pageY - tooltipHeight - padding;
-            }
-
-            // 如果超出左邊界，顯示在右側
-            if (left < 0) {
-              left = padding;
-            }
-
-            // 如果超出上邊界，顯示在下方
-            if (top < 0) {
-              top = event.pageY + padding;
-            }
-
-            // 顯示tooltip - 使用更簡單直接的方式
-            const tooltipNode = tooltip.node();
-            if (!tooltipNode) {
-              console.error('[MapTab] Tooltip element not found!');
-              return;
-            }
-
-            tooltip
-              .html(
-                `<div style="font-weight: 600; margin-bottom: 4px;">Value: <span style="color: #4dd0e1;">${value.toFixed(2)}</span></div>
-                 <div style="font-size: 11px; color: #ccc;">緯度: ${lat.toFixed(4)}</div>
-                 <div style="font-size: 11px; color: #ccc;">經度: ${lon.toFixed(4)}</div>`
-              )
-              .style('left', left + 'px')
-              .style('top', top + 'px');
-
-            // 強制顯示tooltip
-            tooltipNode.style.display = 'block';
-            tooltipNode.style.visibility = 'visible';
-            tooltipNode.style.opacity = '1';
-            tooltipNode.style.zIndex = '99999';
-
-            console.log('[MapTab] Tooltip shown at:', left, top); // 調試日誌
-
-            // 點不可見，不需要高亮效果
-          };
-
-          const handleMousemove = function (event) {
-            event.stopPropagation();
-            // 計算tooltip位置，避免超出視窗邊界
-            const tooltipWidth = 180;
-            const tooltipHeight = 80;
-            const padding = 10;
-            let left = event.pageX + padding;
-            let top = event.pageY - padding;
-
-            if (left + tooltipWidth > window.innerWidth) {
-              left = event.pageX - tooltipWidth - padding;
-            }
-            if (top + tooltipHeight > window.innerHeight) {
-              top = event.pageY - tooltipHeight - padding;
-            }
-            if (left < 0) {
-              left = padding;
-            }
-            if (top < 0) {
-              top = event.pageY + padding;
-            }
-
-            const tooltipNode = tooltip.node();
-            if (tooltipNode) {
-              tooltipNode.style.left = left + 'px';
-              tooltipNode.style.top = top + 'px';
-            }
-          };
-
-          const handleMouseout = function () {
-            const tooltipNode = tooltip.node();
-            if (tooltipNode) {
-              tooltipNode.style.opacity = '0';
-              setTimeout(() => {
-                tooltipNode.style.display = 'none';
-                tooltipNode.style.visibility = 'hidden';
-              }, 200);
-            }
-
-            // 點不可見，不需要恢復樣式
-          };
-
-          // 進入的點，顯示所有點（金色，與線條一致）
-          const enterPoints = points
-            .enter()
-            .append('circle')
-            .attr('class', 'data-point')
-            .attr('r', 3) // 點的半徑
-            .attr('fill', '#FFC125') // 金色，與線條一致
-            .attr('stroke', '#fff') // 白色邊框
-            .attr('stroke-width', 1) // 邊框寬度
-            .attr('opacity', 0.95) // 顯示點，與線條透明度一致
-            .style('cursor', 'pointer')
-            .style('pointer-events', 'all') // 確保可以接收事件
-            .on('mouseover', handleMouseover)
-            .on('mousemove', handleMousemove)
-            .on('mouseout', handleMouseout);
-
-          // 合併進入和更新的點（不顯示，但保留hover功能）
-          const allPoints = enterPoints
-            .merge(points)
-            .attr('cx', (d) => {
-              const baseCoords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
-              if (!baseCoords) return 0;
-              const value = d.properties?.value || 0;
-              // y軸模式：x座標正常
-              // x軸模式：x座標向右偏移（x增加），value越大，點越右
-              if (drawDirection.value === 'x') {
-                return baseCoords[0] + heightScale(value);
-              }
-              return baseCoords[0];
-            })
-            .attr('cy', (d) => {
-              const baseCoords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
-              if (!baseCoords) return 0;
-              const value = d.properties?.value || 0;
-              // y軸模式：y座標向上偏移（y減少），value越大，點越高
-              // x軸模式：y座標正常
-              if (drawDirection.value === 'y') {
-                return baseCoords[1] - heightScale(value);
-              }
-              return baseCoords[1];
-            })
-            .attr('r', 3) // 點的半徑
-            .attr('fill', '#FFC125') // 金色，與線條一致
-            .attr('stroke', '#fff') // 白色邊框
-            .attr('stroke-width', 1) // 邊框寬度
-            .attr('opacity', 0.95) // 顯示點，與線條透明度一致
-            .style('pointer-events', 'all') // 確保可以接收事件
-            .style('cursor', 'pointer');
-
-          // 確保所有點都有事件綁定（包括更新的點）
-          allPoints
-            .on('mouseover', handleMouseover)
-            .on('mousemove', handleMousemove)
-            .on('mouseout', handleMouseout);
-
-          // 移除退出的點
-          points.exit().remove();
+          // 保留點圖層，避免在繪製後被移除
 
           console.log('[MapTab] 折線圖地圖繪製完成，線條數量:', lineData.length);
           console.log('[MapTab] 點數量:', features.length);
           console.log('[MapTab] Value 範圍:', minValue, '到', maxValue);
           console.log('[MapTab] 高度偏移範圍: 0 到', maxHeightOffset, 'px');
-          console.log('[MapTab] 點已繪製，請嘗試點擊圓點查看 alert，或懸停查看 tooltip');
-          console.log('[MapTab] 點的 pointer-events:', allPoints.style('pointer-events'));
-          console.log('[MapTab] 點的 cursor:', allPoints.style('cursor'));
         } catch (error) {
           console.error('[MapTab] 折線圖地圖繪製失敗:', error);
         }
@@ -563,42 +599,34 @@
         const minValue = Math.min(...values);
         const maxValue = Math.max(...values);
 
-        // 計算高度比例尺（統一放大1.5倍）
+        // 計算高度比例尺（統一放大2倍）
         const rect = mapContainer.value.getBoundingClientRect();
-        const maxHeightOffset = rect.height * 0.075; // 統一放大1.5倍
+        const maxHeightOffset = rect.height * 0.1; // 統一放大2倍
         const heightScale = d3
           .scaleLinear()
           .domain([minValue, maxValue])
           .range([0, maxHeightOffset]);
 
-        // 創建折線生成器（根據繪製方向調整高度偏移）
+        // 創建折線生成器（x軸和y軸都使用相同的偏移方向：向上）
         const lineGenerator = d3
           .line()
           .x((d) => {
             const baseCoords = projection([d.lon, d.lat]);
             if (!baseCoords) return 0;
-            // y軸模式：x座標正常
-            // x軸模式：x座標向右偏移（x增加），value越大，點越右
-            if (drawDirection.value === 'x') {
-              return baseCoords[0] + heightScale(d.value);
-            }
+            // x軸和y軸模式：x座標都正常（不偏移）
             return baseCoords[0];
           })
           .y((d) => {
             const baseCoords = projection([d.lon, d.lat]);
             if (!baseCoords) return 0;
-            // y軸模式：y座標向上偏移（y減少），value越大，點越高
-            // x軸模式：y座標正常
-            if (drawDirection.value === 'y') {
-              return baseCoords[1] - heightScale(d.value);
-            }
-            return baseCoords[1];
+            // x軸和y軸模式：y座標都向上偏移（y減少），value越大，點越高
+            return baseCoords[1] - heightScale(d.value);
           })
-          .curve(d3.curveCatmullRom.alpha(0.5)); // 使用Catmull-Rom曲線，alpha=0.5
+          .curve(d3.curveCardinal.tension(0)); // 使用 curveCardinal.tension(0)
 
         // 更新所有折線路徑（從綁定的數據中獲取closedPoints）
         g.selectAll('path.horizontal-line').attr('d', (d) => {
-          if (d && d.closedPoints) {
+          if (d && d.closedPoints && d.closedPoints.length > 0) {
             return lineGenerator(d.closedPoints);
           } else if (d && d.points) {
             // 如果沒有closedPoints，則直接使用points（不閉合）
@@ -607,145 +635,146 @@
           return '';
         });
 
-        // 畫所有點，不過濾奇數
+        // 不再單獨更新黑線，因為已經包含在閉合多邊形中
 
-        // 獲取或創建tooltip元素
-        let tooltip = d3.select('body').select('.map-tooltip');
-        if (tooltip.empty()) {
-          tooltip = d3
-            .select('body')
-            .append('div')
-            .attr('class', 'map-tooltip')
-            .style('position', 'fixed')
-            .style('padding', '10px 14px')
-            .style('background', 'rgba(0, 0, 0, 0.9)')
-            .style('color', '#fff')
-            .style('border-radius', '6px')
-            .style('font-size', '13px')
-            .style('font-family', 'system-ui, -apple-system, sans-serif')
-            .style('pointer-events', 'none')
-            .style('opacity', '0')
-            .style('display', 'none')
-            .style('visibility', 'hidden')
-            .style('z-index', '99999')
-            .style('box-shadow', '0 4px 12px rgba(0,0,0,0.4)')
-            .style('transition', 'opacity 0.2s ease')
-            .style('white-space', 'nowrap')
-            .style('line-height', '1.6')
-            .style('max-width', '200px');
+        // 更新所有點的位置
+        const allPoints = [];
+        g.selectAll('path.horizontal-line').each(function (d) {
+          if (d && d.closedPoints && d.closedPoints.length > 0) {
+            d.closedPoints.forEach((point) => {
+              // 確保點有正確的 lon 和 lat 屬性
+              const pointData = {
+                lon: point.lon !== undefined ? point.lon : point.geometry?.coordinates[0],
+                lat: point.lat !== undefined ? point.lat : point.geometry?.coordinates[1],
+                value: point.value !== undefined ? point.value : point.properties?.value || 0,
+                isBasePoint:
+                  point.isBasePoint !== undefined
+                    ? point.isBasePoint
+                    : point.value === 0 || point.properties?.value === 0,
+              };
+              // 確保 lon 和 lat 是有效的數字
+              if (
+                pointData.lon != null &&
+                pointData.lat != null &&
+                !isNaN(pointData.lon) &&
+                !isNaN(pointData.lat)
+              ) {
+                allPoints.push({
+                  ...pointData,
+                  geometry: {
+                    coordinates: [pointData.lon, pointData.lat],
+                  },
+                  properties: {
+                    value: pointData.value,
+                    isBasePoint: pointData.isBasePoint,
+                  },
+                });
+              }
+            });
+          }
+        });
+
+        // 獲取或創建點組
+        let pointsGroup = g.select('g.points-group');
+        if (pointsGroup.empty()) {
+          pointsGroup = g.append('g').attr('class', 'points-group');
         }
 
-        // 定義hover事件處理函數
-        const handleMouseover = function (event, d) {
-          event.stopPropagation();
-
-          const value = d.properties?.value || 0;
-          const lat = d.geometry.coordinates[1];
+        // 更新點的位置
+        // 使用更唯一的鍵來識別點（包括經緯度和value，避免重複）
+        const points = pointsGroup.selectAll('circle.data-point').data(allPoints, (d, i) => {
           const lon = d.geometry.coordinates[0];
+          const lat = d.geometry.coordinates[1];
+          const value = d.properties?.value || 0;
+          const isBasePoint = d.properties?.isBasePoint || false;
+          return `${drawDirection.value}_${lon}_${lat}_${value}_${isBasePoint}_${i}`;
+        });
 
-          const tooltipNode = tooltip.node();
-          if (tooltipNode) {
-            tooltipNode.innerHTML = `
-              <div style="font-weight: 600; margin-bottom: 6px; font-size: 14px;">數值資訊</div>
-              <div style="margin-bottom: 3px;">
-                <span style="color: #FFD700;">值:</span> <span style="font-weight: 500;">${value.toFixed(2)}</span>
-              </div>
-              <div style="margin-bottom: 3px;">
-                <span style="color: #87CEEB;">緯度:</span> <span style="font-weight: 500;">${lat.toFixed(4)}</span>
-              </div>
-              <div>
-                <span style="color: #90EE90;">經度:</span> <span style="font-weight: 500;">${lon.toFixed(4)}</span>
-              </div>
-            `;
-            tooltipNode.style.display = 'block';
-            tooltipNode.style.visibility = 'visible';
-            tooltipNode.style.opacity = '1';
-            tooltipNode.style.left = event.clientX + 15 + 'px';
-            tooltipNode.style.top = event.clientY + 15 + 'px';
-          }
-        };
+        // 進入的點
+        const enterPoints = points
+          .enter()
+          .append('circle')
+          .attr('class', 'data-point')
+          .attr('r', 3)
+          .style('pointer-events', 'all')
+          .style('cursor', 'pointer');
 
-        const handleMousemove = function (event) {
-          event.stopPropagation();
+        // 合併進入和更新的點
+        enterPoints
+          .merge(points)
+          .attr('cx', (d) => {
+            const lon = d.geometry.coordinates[0];
+            const lat = d.geometry.coordinates[1];
+            const coords = projection([lon, lat]);
+            if (!coords || isNaN(coords[0]) || isNaN(coords[1])) {
+              return 0;
+            }
 
-          const tooltipNode = tooltip.node();
-          if (tooltipNode) {
-            tooltipNode.style.left = event.clientX + 15 + 'px';
-            tooltipNode.style.top = event.clientY + 15 + 'px';
-          }
-        };
+            const value = d.properties?.value || 0;
+            // x軸模式：x 向左偏移；y軸模式：x 不偏移
+            if (drawDirection.value === 'x') {
+              return coords[0] - heightScale(value);
+            }
+            return coords[0];
+          })
+          .attr('cy', (d) => {
+            const lon = d.geometry.coordinates[0];
+            const lat = d.geometry.coordinates[1];
+            const coords = projection([lon, lat]);
+            if (!coords || isNaN(coords[0]) || isNaN(coords[1])) {
+              return 0;
+            }
 
-        const handleMouseout = function () {
-          const tooltipNode = tooltip.node();
-          if (tooltipNode) {
-            tooltipNode.style.opacity = '0';
-            setTimeout(() => {
-              tooltipNode.style.display = 'none';
-              tooltipNode.style.visibility = 'hidden';
-            }, 200);
-          }
-        };
+            const value = d.properties?.value || 0;
+            // y軸模式：y 向上偏移；x軸模式：y 不偏移
+            if (drawDirection.value === 'y') {
+              return coords[1] - heightScale(value);
+            }
+            return coords[1];
+          })
+          .attr('fill', (d) => {
+            const value = d.properties?.value || 0;
+            const isBasePoint = d.properties?.isBasePoint || value === 0;
+            return isBasePoint ? '#000000' : '#FFC125';
+          })
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 1)
+          .attr('opacity', 0.95);
 
-        // 更新所有點的位置和樣式
-        const pointsGroup = g.select('g.points-group');
-        if (!pointsGroup.empty()) {
-          const points = pointsGroup.selectAll('circle.data-point').data(features, (d) => {
-            return `${d.geometry.coordinates[0]}_${d.geometry.coordinates[1]}`;
+        // 移除退出的點
+        points.exit().remove();
+
+        // 更新hover事件處理
+        pointsGroup
+          .selectAll('circle.data-point')
+          .on('mouseover', function (event, d) {
+            const value = d.properties?.value || 0;
+            if (value === 0) {
+              return;
+            }
+
+            const tooltip = d3.select('.map-tooltip');
+            tooltip
+              .style('display', 'block')
+              .style('visibility', 'visible')
+              .style('opacity', '1')
+              .html(`Value: ${value.toFixed(2)}`)
+              .style('left', event.pageX + 10 + 'px')
+              .style('top', event.pageY - 10 + 'px');
+          })
+          .on('mousemove', function (event, d) {
+            const value = d.properties?.value || 0;
+            if (value === 0) {
+              return;
+            }
+
+            const tooltip = d3.select('.map-tooltip');
+            tooltip.style('left', event.pageX + 10 + 'px').style('top', event.pageY - 10 + 'px');
+          })
+          .on('mouseout', function () {
+            const tooltip = d3.select('.map-tooltip');
+            tooltip.style('opacity', '0').style('display', 'none').style('visibility', 'hidden');
           });
-
-          // 進入的點
-          const enterPoints = points
-            .enter()
-            .append('circle')
-            .attr('class', 'data-point')
-            .attr('r', 3)
-            .attr('fill', '#FFC125')
-            .attr('stroke', '#fff')
-            .attr('stroke-width', 1)
-            .attr('opacity', 0.95)
-            .style('cursor', 'pointer')
-            .style('pointer-events', 'all')
-            .on('mouseover', handleMouseover)
-            .on('mousemove', handleMousemove)
-            .on('mouseout', handleMouseout);
-
-          // 合併並更新所有點
-          enterPoints
-            .merge(points)
-            .attr('cx', (d) => {
-              const baseCoords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
-              if (!baseCoords) return 0;
-              const value = d.properties?.value || 0;
-              // y軸模式：x座標正常
-              // x軸模式：x座標向右偏移（x增加），value越大，點越右
-              if (drawDirection.value === 'x') {
-                return baseCoords[0] + heightScale(value);
-              }
-              return baseCoords[0];
-            })
-            .attr('cy', (d) => {
-              const baseCoords = projection([d.geometry.coordinates[0], d.geometry.coordinates[1]]);
-              if (!baseCoords) return 0;
-              const value = d.properties?.value || 0;
-              // y軸模式：y座標向上偏移（y減少），value越大，點越高
-              // x軸模式：y座標正常
-              if (drawDirection.value === 'y') {
-                return baseCoords[1] - heightScale(value);
-              }
-              return baseCoords[1];
-            })
-            .attr('r', 3) // 點的半徑
-            .attr('fill', '#FFC125') // 金色，與線條一致
-            .attr('stroke', '#fff') // 白色邊框
-            .attr('stroke-width', 1) // 邊框寬度
-            .attr('opacity', 0.95) // 顯示點，與線條透明度一致
-            .on('mouseover', handleMouseover)
-            .on('mousemove', handleMousemove)
-            .on('mouseout', handleMouseout);
-
-          // 移除退出的點
-          points.exit().remove();
-        }
       };
 
       /**
@@ -904,9 +933,9 @@
         drawDirection.value = direction;
         // 重新繪製地圖
         if (g && pointsData.value) {
-          // 清除現有的線條和點
+          // 清除現有的線條和點組
           g.selectAll('path.horizontal-line').remove();
-          g.selectAll('circle.data-point').remove();
+          g.selectAll('g.points-group').remove();
           // 重新繪製
           drawPointsMap();
         }
