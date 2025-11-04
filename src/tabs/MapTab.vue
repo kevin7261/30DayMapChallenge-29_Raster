@@ -433,12 +433,12 @@
           enterLines
             .merge(lines)
             .attr('stroke', '#FFC125') // 金色邊框
-            .attr('stroke-width', 16) // 16px寬度（所有線條統一設置）- 必須在 filter 之前
+            .attr('stroke-width', 1) // 1px寬度（所有線條統一設置）
             .attr('stroke-linecap', 'round')
             .attr('stroke-linejoin', 'round')
             .attr('opacity', 0.95)
             .attr('fill', 'none') // 不填充
-            .attr('filter', 'url(#line-shadow-filter)') // 陰影效果
+            // 不使用陰影效果
             .attr('d', (d) => {
               if (d && d.closedPoints && d.closedPoints.length > 0) {
                 // 使用包含數據點和基準點的點（用於繪製黃線）
@@ -776,12 +776,12 @@
         // 確保 stroke-width 在 filter 之前設置，避免 filter 影響線條寬度
         allLines
           .attr('stroke', '#FFC125') // 確保顏色一致
-          .attr('stroke-width', 16) // 首先設置所有線條為16px - 必須在 filter 之前
+          .attr('stroke-width', 1) // 首先設置所有線條為1px
           .attr('stroke-linecap', 'round')
           .attr('stroke-linejoin', 'round')
           .attr('opacity', 0.95)
           .attr('fill', 'none')
-          .attr('filter', 'url(#line-shadow-filter)') // 陰影效果
+          // 不使用陰影效果
           .attr('d', (d) => {
             if (d && d.closedPoints && d.closedPoints.length > 0) {
               return lineGenerator(d.closedPoints);
@@ -1187,8 +1187,8 @@
   /* 距離圓圈使用 D3.js 繪製，包含 5000km 虛線圓圈和地球邊界實線圓圈 */
 
   :deep(.horizontal-line) {
-    /* 預設 16px */
-    stroke-width: 16;
+    /* 預設 1px */
+    stroke-width: 1;
     transition:
       stroke-width 0.2s ease,
       opacity 0.2s ease;
@@ -1196,8 +1196,8 @@
 
   :deep(.horizontal-line:hover) {
     opacity: 1;
-    /* hover 同為 16px（不變粗） */
-    stroke-width: 16;
+    /* hover 同為 1px（不變粗） */
+    stroke-width: 1;
   }
 
   /* 點hover效果 */
