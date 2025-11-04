@@ -119,34 +119,32 @@
             defs = svg.append('defs');
           }
 
-          // 創建陰影filter
+          // 創建陰影 filter（用於線條投影）
           let shadowFilter = defs.select('#line-shadow-filter');
           if (shadowFilter.empty()) {
             shadowFilter = defs
               .append('filter')
               .attr('id', 'line-shadow-filter')
-              .attr('x', '-50%')
-              .attr('y', '-50%')
-              .attr('width', '200%')
-              .attr('height', '200%');
+              .attr('x', '-100%')
+              .attr('y', '-100%')
+              .attr('width', '300%')
+              .attr('height', '300%')
+              .attr('filterUnits', 'userSpaceOnUse');
 
-            // 添加drop shadow效果
-            // 创建阴影颜色
+            // 製作柔和陰影（適配 16px 粗線）
             shadowFilter
               .append('feColorMatrix')
               .attr('in', 'SourceAlpha')
               .attr('type', 'matrix')
-              .attr('values', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.3 0')
-              .attr('result', 'shadowColor');
+              .attr('values', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.35 0')
+              .attr('result', 'alpha');
 
-            // 模糊阴影
             shadowFilter
               .append('feGaussianBlur')
-              .attr('in', 'shadowColor')
-              .attr('stdDeviation', 3)
+              .attr('in', 'alpha')
+              .attr('stdDeviation', 4)
               .attr('result', 'blur');
 
-            // 偏移阴影
             shadowFilter
               .append('feOffset')
               .attr('in', 'blur')
@@ -154,7 +152,6 @@
               .attr('dy', 2)
               .attr('result', 'offsetBlur');
 
-            // 合并阴影和原始图形
             const feMerge = shadowFilter.append('feMerge');
             feMerge.append('feMergeNode').attr('in', 'offsetBlur');
             feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
@@ -417,11 +414,18 @@
           lines.exit().remove();
 
           // 合併進入和更新的線條 - 繪製黃線（數據線，點線樣式）
-          lines
-            .enter()
-            .append('path')
-            .attr('class', 'horizontal-line')
-            .merge(lines) // 合併 enter 和 update selection
+          const enterLines = lines.enter().append('path').attr('class', 'horizontal-line');
+
+          // 合併後統一設置所有屬性，確保 stroke-width 在 filter 之前設置
+          enterLines
+            .merge(lines)
+            .attr('stroke', '#FFC125') // 金色邊框
+            .attr('stroke-width', 16) // 16px寬度（所有線條統一設置）- 必須在 filter 之前
+            .attr('stroke-linecap', 'round')
+            .attr('stroke-linejoin', 'round')
+            .attr('opacity', 0.95)
+            .attr('fill', 'none') // 不填充
+            .attr('filter', 'url(#line-shadow-filter)') // 陰影效果
             .attr('d', (d) => {
               if (d && d.closedPoints && d.closedPoints.length > 0) {
                 // 使用包含數據點和基準點的點（用於繪製黃線）
@@ -429,13 +433,6 @@
               }
               return '';
             })
-            .attr('stroke', '#FFC125') // 金色邊框
-            .attr('stroke-width', 8) // 8px寬度（所有線條統一設置）
-            .attr('stroke-linecap', 'round')
-            .attr('stroke-linejoin', 'round')
-            .attr('opacity', 0.95)
-            .attr('fill', 'none') // 不填充
-            .attr('filter', 'url(#line-shadow-filter)') // 添加陰影效果
             .style('pointer-events', 'none'); // 折線不攔截鼠標事件
 
           // 不再單獨繪製黑線，因為已經包含在閉合多邊形中
@@ -763,9 +760,15 @@
         // 更新所有折線路徑（從綁定的數據中獲取closedPoints）
         const allLines = g.selectAll('path.horizontal-line');
 
+        // 確保 stroke-width 在 filter 之前設置，避免 filter 影響線條寬度
         allLines
-          .attr('stroke-width', 8) // 首先設置所有線條為8px
           .attr('stroke', '#FFC125') // 確保顏色一致
+          .attr('stroke-width', 16) // 首先設置所有線條為16px - 必須在 filter 之前
+          .attr('stroke-linecap', 'round')
+          .attr('stroke-linejoin', 'round')
+          .attr('opacity', 0.95)
+          .attr('fill', 'none')
+          .attr('filter', 'url(#line-shadow-filter)') // 陰影效果
           .attr('d', (d) => {
             if (d && d.closedPoints && d.closedPoints.length > 0) {
               return lineGenerator(d.closedPoints);
@@ -774,7 +777,8 @@
               return lineGenerator(d.points);
             }
             return '';
-          });
+          })
+          .style('pointer-events', 'none');
 
         // 不再單獨更新黑線，因為已經包含在閉合多邊形中
 
@@ -1170,8 +1174,8 @@
   /* 距離圓圈使用 D3.js 繪製，包含 5000km 虛線圓圈和地球邊界實線圓圈 */
 
   :deep(.horizontal-line) {
-    /* 強制所有線條預設為 8px，避免被其他 CSS 覆蓋 */
-    stroke-width: 8;
+    /* 預設 16px */
+    stroke-width: 16;
     transition:
       stroke-width 0.2s ease,
       opacity 0.2s ease;
@@ -1179,8 +1183,8 @@
 
   :deep(.horizontal-line:hover) {
     opacity: 1;
-    /* hover 時稍微加粗，保持優先權 */
-    stroke-width: 10;
+    /* hover 同為 16px（不變粗） */
+    stroke-width: 16;
   }
 
   /* 點hover效果 */
